@@ -1,0 +1,69 @@
+# Private regtest chain for a fast smoke test of the mining path. Runs as its own
+# Compose project, so it never touches the mainnet or testnet4 containers or volumes:
+#   docker compose -f compose.regtest.yaml up -d
+name: bitcoin-v2solo-regtest
+
+services:
+  bitcoin-node:
+    build:
+      context: .
+      dockerfile: docker/bitcoin.Dockerfile
+    image: bitcoin-v2solo-core:30.2
+    container_name: bitcoin-v2solo-regtest-node
+    command:
+      - -regtest
+      - -datadir=/data
+      - -server=1
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=172.16.0.0/12
+      - -rpcallowip=192.168.0.0/16
+      - -ipcbind=unix
+      # Wallet stays enabled here to provide the bcrt1 payout address and mine the first block.
+      - -printtoconsole=1
+    volumes:
+      - type: volume
+        source: bitcoin-data
+        target: /data
+    ports:
+      - "127.0.0.1:18443:18443"
+    stop_grace_period: 10m
+    restart: unless-stopped
+
+  pool:
+    image: stratumv2/pool_sv2@sha256:bd694b5f9263171b587e2598a85d3b3b2d7bb35b14d4353ba13ad003d4076332
+    container_name: bitcoin-v2solo-regtest-pool
+    depends_on:
+      bitcoin-node:
+        condition: service_started
+    # Same authority keys as mainnet, so the Bitaxe keeps the same trusted public key.
+    env_file:
+      - ${POOL_ENV_FILE:-G:/bitcoin-v2solo/secrets/pool.env}
+    environment:
+      POOL__LISTEN_ADDRESS: 0.0.0.0:3333
+      POOL__CERT_VALIDITY_SEC: "3600"
+      POOL__COINBASE_REWARD_SCRIPT: addr(${REGTEST_PAYOUT_ADDRESS:?Set REGTEST_PAYOUT_ADDRESS in .env})
+      POOL__SERVER_ID: "1"
+      POOL__POOL_SIGNATURE: CraigD V2 Solo regtest
+      POOL__SHARES_PER_MINUTE: "6.0"
+      POOL__SHARE_BATCH_SIZE: "10"
+      POOL__MONITORING_ADDRESS: 0.0.0.0:9090
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__VERSION: "30"
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__NETWORK: regtest
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__DATA_DIR: /data
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__FEE_THRESHOLD: "100"
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__MIN_INTERVAL: "5"
+    volumes:
+      # Read-write: the pool saves each solved block under /data before submitting it,
+      # and a read-only mount makes block submission fail.
+      - type: volume
+        source: bitcoin-data
+        target: /data
+    ports:
+      - "${POOL_BIND_ADDRESS:-10.0.0.185}:3335:3333"
+      - "127.0.0.1:9092:9090"
+    restart: unless-stopped
+    profiles: ["pool"]
+
+volumes:
+  bitcoin-data:
+    name: bitcoin-v2solo-regtest-data

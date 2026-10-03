@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Solo Mining Console</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow" id="chain-label">PRIVATE STRATUM V2 POOL</p>
+        <h1>Mining Console</h1>
+      </div>
+      <div class="header-state">
+        <span id="connection-dot" class="status-dot"></span>
+        <span id="connection-label">Connecting</span>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="sync-band" aria-labelledby="sync-heading">
+        <div>
+          <p class="eyebrow">BITCOIN CORE</p>
+          <h2 id="sync-heading">Chain Synchronization</h2>
+        </div>
+        <div class="sync-data">
+          <strong id="sync-percent">--</strong>
+          <span id="sync-detail">Waiting for node data</span>
+        </div>
+        <div class="progress-track" aria-hidden="true"><div id="sync-progress" class="progress-fill"></div></div>
+      </section>
+
+      <section class="metrics" aria-label="Pool overview">
+        <article class="metric"><span>Pool clients</span><strong id="pool-clients">--</strong><small id="pool-channels">-- channels</small></article>
+        <article class="metric"><span>Pool hashrate</span><strong id="pool-hashrate">--</strong><small>active SV2 channels</small></article>
+        <article class="metric"><span>Core peers</span><strong id="core-peers">--</strong><small id="core-network">network status</small></article>
+        <article class="metric"><span>Pool uptime</span><strong id="pool-uptime">--</strong><small>current process</small></article>
+      </section>
+
+      <section class="metrics" aria-label="Next block reward">
+        <article class="metric reward-card">
+          <span>Next block reward</span>
+          <strong id="reward-total">--</strong>
+          <small id="reward-fiat">&nbsp;</small>
+          <small id="reward-odds">&nbsp;</small>
+          <dl class="reward-parts">
+            <div><dt>Subsidy</dt><dd id="reward-subsidy">--</dd></div>
+            <div><dt>Fees</dt><dd id="reward-fees">--</dd></div>
+            <div><dt>Transactions</dt><dd id="reward-transactions">--</dd></div>
+            <div><dt>Height</dt><dd id="reward-height">--</dd></div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="metrics" aria-label="Block target">
+        <article class="metric"><span>Best share</span><strong id="best-share">--</strong><small>since the pool started</small></article>
+        <article class="metric"><span>Block target</span><strong id="block-target">--</strong><small id="block-target-detail">next block difficulty</small></article>
+        <article class="metric"><span>Best vs target</span><strong id="best-progress">--</strong><small>best share / block target</small></article>
+        <article class="metric"><span>Share difficulty</span><strong id="share-difficulty">--</strong><small>pool's current share target</small></article>
+      </section>
+
+      <section class="panel" aria-labelledby="shares-heading">
+        <div class="section-heading">
+          <div><p class="eyebrow">LOCAL SV2 POOL</p><h2 id="shares-heading">Share Submissions</h2></div>
+          <div class="share-totals"><span><strong id="shares-accepted">0</strong> accepted</span><span><strong id="shares-rejected">0</strong> rejected</span></div>
+        </div>
+        <div id="share-events" class="share-events"><p class="empty">No SV2 share submissions observed in this dashboard session.</p></div>
+      </section>
+
+      <section class="panel" aria-labelledby="miners-heading">
+        <div class="section-heading">
+          <div><p class="eyebrow">MINER FLEET</p><h2 id="miners-heading">Bitaxe Workers</h2></div>
+          <span id="miner-count" class="count-label">0 configured</span>
+        </div>
+        <div id="miners" class="miners"><p class="empty">Add Bitaxe IP addresses to <code>DASHBOARD_BITAXE_HOSTS</code> in the local <code>.env</code>, then recreate the dashboard.</p></div>
+      </section>
+
+      <section class="panel network-panel" aria-labelledby="network-heading">
+        <div class="section-heading">
+          <div><p class="eyebrow">NODE NETWORK</p><h2 id="network-heading">Chain Position</h2></div>
+          <span id="updated-at" class="updated">No data yet</span>
+        </div>
+        <dl class="network-grid">
+          <div><dt>Blocks</dt><dd id="block-height">--</dd></div>
+          <div><dt>Headers</dt><dd id="header-height">--</dd></div>
+          <div><dt>Disk usage</dt><dd id="disk-usage">--</dd></div>
+          <div><dt>Difficulty</dt><dd id="difficulty">--</dd></div>
+        </dl>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

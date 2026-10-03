@@ -1,0 +1,101 @@
+services:
+  bitcoin-node:
+    build:
+      context: .
+      dockerfile: docker/bitcoin.Dockerfile
+    image: bitcoin-v2solo-core:30.2
+    container_name: bitcoin-v2solo-node
+    command:
+      - -datadir=/data
+      - -server=1
+      # Let the dashboard container reach RPC over Docker's private networks; the host port stays bound to 127.0.0.1.
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=172.16.0.0/12
+      - -rpcallowip=192.168.0.0/16
+      - -ipcbind=unix
+      - -disablewallet=1
+      - -prune=${BITCOIN_PRUNE_MIB:-20000}
+      - -printtoconsole=1
+    volumes:
+      - type: volume
+        source: bitcoin-data
+        target: /data
+    ports:
+      - "127.0.0.1:8332:8332"
+      - "8333:8333"
+    # Give Bitcoin Core time to flush its databases; the 10s default can corrupt them.
+    stop_grace_period: 10m
+    restart: unless-stopped
+
+  sv2-keygen:
+    build:
+      context: .
+      dockerfile: docker/sv2-keygen.Dockerfile
+    image: bitcoin-v2solo-keygen:1
+    profiles: ["tools"]
+
+  pool:
+    image: stratumv2/pool_sv2@sha256:bd694b5f9263171b587e2598a85d3b3b2d7bb35b14d4353ba13ad003d4076332
+    container_name: bitcoin-v2solo-pool
+    depends_on:
+      bitcoin-node:
+        condition: service_started
+    env_file:
+      - ${POOL_ENV_FILE:-G:/bitcoin-v2solo/secrets/pool.env}
+    environment:
+      POOL__LISTEN_ADDRESS: 0.0.0.0:3333
+      POOL__CERT_VALIDITY_SEC: "3600"
+      POOL__COINBASE_REWARD_SCRIPT: addr(${POOL_PAYOUT_ADDRESS:-replace-with-your-mainnet-bitcoin-address})
+      POOL__SERVER_ID: "1"
+      POOL__POOL_SIGNATURE: CraigD V2 Solo
+      POOL__SHARES_PER_MINUTE: "6.0"
+      POOL__SHARE_BATCH_SIZE: "10"
+      POOL__MONITORING_ADDRESS: 0.0.0.0:9090
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__VERSION: "30"
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__NETWORK: mainnet
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__DATA_DIR: /data
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__FEE_THRESHOLD: "100"
+      POOL__TEMPLATE_PROVIDER_TYPE__BITCOINCOREIPC__MIN_INTERVAL: "5"
+    volumes:
+      # Read-write: the pool saves each solved block under /data before submitting it,
+      # and a read-only mount makes block submission fail.
+      - type: volume
+        source: bitcoin-data
+        target: /data
+    ports:
+      - "${POOL_BIND_ADDRESS:-10.0.0.185}:3333:3333"
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+    profiles: ["pool"]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+    image: bitcoin-v2solo-dashboard:1
+    container_name: bitcoin-v2solo-dashboard
+    depends_on:
+      bitcoin-node:
+        condition: service_started
+      pool:
+        condition: service_started
+        required: false
+    environment:
+      DASHBOARD_BITAXE_HOSTS: ${DASHBOARD_BITAXE_HOSTS:-}
+      DASHBOARD_FIAT: ${DASHBOARD_FIAT:-USD}
+    volumes:
+      - type: volume
+        source: bitcoin-data
+        target: /data
+        read_only: true
+    ports:
+      - "${DASHBOARD_BIND_ADDRESS:-10.0.0.185}:8080:8080"
+      # Local-only listener for Tailscale Serve, which publishes the dashboard to the tailnet.
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    profiles: ["dashboard"]
+
+volumes:
+  # Lives inside Docker Desktop's disk image; move that image to G: to keep the node on G:.
+  bitcoin-data:
+    name: bitcoin-v2solo-data

@@ -1,0 +1,8 @@
+.env
+
+# Bitcoin Core data is stored on the configured host drive, never in this repository.
+data/
+secrets/
+# Build output and local tool artifacts.
+target/
+.playwright-mcp/
