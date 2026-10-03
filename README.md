@@ -80,7 +80,24 @@ docker compose logs -f pool
 In AxeOS, create an SV2 pool entry with host `10.0.0.185`, port `3333`, and the
 authority public key from `G:\bitcoin-v2solo\secrets\pool.env`. Set the miner
 username to your payout address, optionally followed by `.bitaxe-1` or
-`.bitaxe-2`. The username payout address takes precedence for solo rewards.
+`.bitaxe-2`.
+
+### Who gets paid
+
+Each miner's username decides the payout of the blocks it finds, so other people
+can mine here to their own address. `POOL_PAYOUT_ADDRESS` is only the pool's
+address. Verified on regtest with real blocks for the first and last rows:
+
+| Username | Block reward |
+| --- | --- |
+| `<address>` or `<address>.<worker>` | 100% to that address |
+| `sri/solo/<address>/<worker>` | 100% to that address |
+| `sri/donate/<percent>/<address>/<worker>` | `<percent>` to the pool, the rest to the address |
+| `sri/donate/<worker>`, or no valid address (for example a typo) | 100% to `POOL_PAYOUT_ADDRESS` |
+
+A mistyped address silently pays the pool, so check the dashboard's Pool Workers
+panel: each worker shows the address its blocks pay, and anything paying the
+pool is highlighted.
 
 Do not run `sv2-keygen` again after configuring AxeOS. Generating new authority
 keys changes the public key trusted by every miner; rotate it only when you

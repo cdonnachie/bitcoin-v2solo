@@ -83,6 +83,8 @@ services:
     environment:
       DASHBOARD_BITAXE_HOSTS: ${DASHBOARD_BITAXE_HOSTS:-}
       DASHBOARD_FIAT: ${DASHBOARD_FIAT:-USD}
+      # Shown when a worker's username has no payout address, so its blocks pay the pool.
+      DASHBOARD_POOL_ADDRESS: ${POOL_PAYOUT_ADDRESS:-}
     volumes:
       - type: volume
         source: bitcoin-data

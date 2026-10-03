@@ -104,6 +104,44 @@ function recordShareEvent(channel, type, count) {
   shareEvents.length = Math.min(shareEvents.length, 30);
 }
 
+// Mirrors SRI's PayoutMode parsing (stratum-apps/src/payout.rs) to show where each channel's
+// block reward goes. Core's validateaddress checks addresses against this node's chain.
+const poolAddress = process.env.DASHBOARD_POOL_ADDRESS || "";
+const addressChecks = new Map();
+
+async function isValidAddress(address) {
+  if (!address) return false;
+  if (!addressChecks.has(address)) {
+    const result = await bitcoinRpc("validateaddress", [address]);
+    addressChecks.set(address, Boolean(result.isvalid));
+  }
+  return addressChecks.get(address);
+}
+
+async function payoutFor(identity) {
+  const toPool = (reason) => ({ mode: "pool", address: poolAddress, minerPercent: 0, reason });
+  // "<address>" or "<address>.<worker>": the whole reward goes to that address.
+  const legacy = identity.split(".")[0];
+  if (await isValidAddress(legacy)) return { mode: "miner", address: legacy, minerPercent: 100 };
+
+  const [prefix, kind, third, fourth] = identity.split("/");
+  if (prefix === "sri" && kind === "solo") {
+    return await isValidAddress(third)
+      ? { mode: "miner", address: third, minerPercent: 100 }
+      : { mode: "invalid", address: third || "", minerPercent: 0, reason: "invalid sri/solo address; the pool rejects this channel" };
+  }
+  if (prefix === "sri" && kind === "donate") {
+    if (fourth === undefined) return toPool("sri/donate: full donation to the pool");
+    const percentage = Number(third);
+    if (!Number.isInteger(percentage) || percentage < 1 || percentage > 99 || !(await isValidAddress(fourth))) {
+      return { mode: "invalid", address: fourth, minerPercent: 0, reason: "invalid sri/donate username; the pool rejects this channel" };
+    }
+    return { mode: "split", address: fourth, minerPercent: 100 - percentage, poolPercent: percentage };
+  }
+  if (prefix === "sri") return { mode: "invalid", address: "", minerPercent: 0, reason: "unknown sri/ username; the pool rejects this channel" };
+  return toPool("no valid address in the username");
+}
+
 async function shareActivity() {
   const clients = await requestJson({ host: "pool", port: 9090, path: "/api/v1/clients?limit=100", method: "GET" });
   const channelResponses = await Promise.all(clients.items.map(async (client) => {
@@ -116,6 +154,9 @@ async function shareActivity() {
     return [...channels.extended_channels, ...channels.standard_channels];
   }));
   const channels = channelResponses.flat();
+  await Promise.all(channels.map(async (channel) => {
+    channel.payout = await payoutFor(String(channel.user_identity || ""));
+  }));
   const activeKeys = new Set();
   let accepted = 0;
   let rejected = 0;

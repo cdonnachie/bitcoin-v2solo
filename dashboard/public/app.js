@@ -81,6 +81,54 @@ function renderMiners(bitaxes) {
   }));
 }
 
+function shortAddress(address) {
+  return address && address.length > 20 ? `${address.slice(0, 10)}…${address.slice(-6)}` : address || "--";
+}
+
+function payoutLabel(payout) {
+  if (!payout) return ["--", ""];
+  if (payout.mode === "miner") return [`Pays ${shortAddress(payout.address)}`, "100% to miner"];
+  if (payout.mode === "split") return [`Pays ${shortAddress(payout.address)}`, `${payout.minerPercent}% miner · ${payout.poolPercent}% pool`];
+  if (payout.mode === "pool") return [`Pays pool ${shortAddress(payout.address)}`, payout.reason];
+  return ["Rejected", payout.reason];
+}
+
+function renderWorkers(channels) {
+  text("worker-count", `${channels.length} channel${channels.length === 1 ? "" : "s"}`);
+  const workers = byId("workers");
+  if (!channels.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No miners are connected to this pool.";
+    workers.replaceChildren(empty);
+    return;
+  }
+
+  workers.replaceChildren(...channels.map((channel) => {
+    const row = document.createElement("div");
+    const payout = channel.payout || {};
+    row.className = `worker-row ${payout.mode || ""}`;
+    const user = String(channel.user_identity || "");
+    const worker = user.includes(".") ? user.slice(user.lastIndexOf(".") + 1) : user.split("/").pop() || `channel ${channel.channel_id}`;
+    const [pays, detail] = payoutLabel(channel.payout);
+    const cells = [
+      ["strong", worker, user],
+      ["span", pays, payout.address || ""],
+      ["span", detail, ""],
+      ["span", hashrate(channel.nominal_hashrate), ""],
+      ["span", `A ${formatter.format(channel.shares_accepted || 0)} · R ${formatter.format(channel.shares_rejected || 0)}`, ""],
+      ["span", `Best ${difficulty(channel.best_diff)}`, ""],
+    ].map(([tag, value, title]) => {
+      const cell = document.createElement(tag);
+      cell.textContent = value;
+      if (title) cell.title = title;
+      return cell;
+    });
+    row.replaceChildren(...cells);
+    return row;
+  }));
+}
+
 function renderShareEvents(shares) {
   text("shares-accepted", formatter.format(shares.accepted));
   text("shares-rejected", formatter.format(shares.rejected));
@@ -204,6 +252,7 @@ function render(status) {
   const target = Number(status.mining?.next?.difficulty ?? status.mining?.difficulty) || 0;
   text("reward-odds", blockOdds(target, Number(pool.sv2_clients.total_hashrate) || 0));
   renderShareEvents(shares);
+  renderWorkers(shares.channels || []);
   renderMiners(bitaxes);
   return status.errors || [];
 }
