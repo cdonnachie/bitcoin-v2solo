@@ -43,8 +43,11 @@ function targetDifficulty(targetHex) {
 }
 
 function percent(value) {
-  if (value >= 1) return `${formatter.format(value * 100)}%`;
-  return `${(value * 100).toPrecision(3)}%`;
+  const amount = value * 100;
+  if (amount >= 1 || amount === 0) return `${formatter.format(amount)}%`;
+  // Fixed notation with three significant digits, e.g. 0.000000131% rather than 1.31e-7%.
+  const decimals = Math.min(20, Math.max(2, 2 - Math.floor(Math.log10(amount))));
+  return `${amount.toFixed(decimals)}%`;
 }
 
 function bytes(value) {
@@ -57,6 +60,8 @@ function text(id, value) {
 
 function renderMiners(bitaxes) {
   const miners = byId("miners");
+  // Only shown when DASHBOARD_BITAXE_HOSTS lists miners this dashboard can reach.
+  miners.closest("section").hidden = !bitaxes.length;
   text("miner-count", `${bitaxes.length} configured`);
   if (!bitaxes.length) return;
 
@@ -107,7 +112,17 @@ function renderWorkers(channels) {
   workers.replaceChildren(...channels.map((channel) => {
     const row = document.createElement("div");
     const payout = channel.payout || {};
-    row.className = `worker-row ${payout.mode || ""}`;
+    // A worker that has not submitted a share for 5 minutes is probably offline or stuck.
+    const lastShare = channel.last_share_at ? Date.parse(channel.last_share_at) : null;
+    const quietFor = (Date.now() - (lastShare ?? Date.parse(channel.first_seen_at || Date.now()))) / 1000;
+    const stale = quietFor > 300;
+    row.className = `worker-row ${payout.mode || ""}${stale ? " stale" : ""}`;
+    const measured = channel.measured_hashrate;
+    const rate = measured != null ? hashrate(measured) : hashrate(channel.nominal_hashrate);
+    const rateTitle = measured != null
+      ? `Measured from submitted work over ${duration(channel.measured_window_secs)}; pool estimate ${hashrate(channel.nominal_hashrate)}`
+      : `Pool estimate; measured rate appears after a minute`;
+    const reasons = Object.entries(channel.shares_rejected_by_reason || {}).map(([reason, count]) => `${reason}: ${count}`).join(", ");
     const user = String(channel.user_identity || "");
     const worker = user.includes(".") ? user.slice(user.lastIndexOf(".") + 1) : user.split("/").pop() || `channel ${channel.channel_id}`;
     const [pays, detail] = payoutLabel(channel.payout);
@@ -115,8 +130,9 @@ function renderWorkers(channels) {
       ["strong", worker, user],
       ["span", pays, payout.address || ""],
       ["span", detail, ""],
-      ["span", hashrate(channel.nominal_hashrate), ""],
-      ["span", `A ${formatter.format(channel.shares_accepted || 0)} · R ${formatter.format(channel.shares_rejected || 0)}`, ""],
+      ["span", rate, rateTitle],
+      ["span", lastShare ? `${duration((Date.now() - lastShare) / 1000)} ago` : stale ? "no shares" : "waiting", "Time since this worker last submitted a share"],
+      ["span", `A ${formatter.format(channel.shares_accepted || 0)} · R ${formatter.format(channel.shares_rejected || 0)}`, reasons ? `Rejected: ${reasons}` : "No rejected shares"],
       ["span", `Best ${difficulty(channel.best_diff)}`, ""],
     ].map(([tag, value, title]) => {
       const cell = document.createElement(tag);

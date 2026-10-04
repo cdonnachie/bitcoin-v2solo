@@ -142,6 +142,32 @@ async function payoutFor(identity) {
   return toPool("no valid address in the username");
 }
 
+// Per-channel history of submitted work over the last 10 minutes. The pool only reports a
+// coarse vardiff-based hashrate, so measure the real one from accepted share work.
+const workHistory = new Map();
+const HASHRATE_WINDOW_MS = 10 * 60_000;
+
+function trackWork(key, channel, now) {
+  const work = Number(channel.share_work_sum) || 0;
+  const shares = Number(channel.shares_accepted || 0) + Number(channel.shares_rejected || 0);
+  let entry = workHistory.get(key);
+  // A drop in the counters means the channel was reopened, so start a fresh history.
+  if (!entry || work < entry.samples.at(-1).work) entry = { firstSeen: now, lastShareAt: null, samples: [] };
+  const last = entry.samples.at(-1);
+  if (last && (work > last.work || shares > last.shares)) entry.lastShareAt = now;
+  entry.samples.push({ t: now, work, shares });
+  while (entry.samples.length > 2 && now - entry.samples[1].t >= HASHRATE_WINDOW_MS) entry.samples.shift();
+  workHistory.set(key, entry);
+
+  // Each unit of share difficulty represents 2^32 hashes on average.
+  const oldest = entry.samples[0];
+  const seconds = (now - oldest.t) / 1000;
+  channel.measured_hashrate = seconds >= 60 ? ((work - oldest.work) * 2 ** 32) / seconds : null;
+  channel.measured_window_secs = Math.round(seconds);
+  channel.last_share_at = entry.lastShareAt ? new Date(entry.lastShareAt).toISOString() : null;
+  channel.first_seen_at = new Date(entry.firstSeen).toISOString();
+}
+
 async function shareActivity() {
   const clients = await requestJson({ host: "pool", port: 9090, path: "/api/v1/clients?limit=100", method: "GET" });
   const channelResponses = await Promise.all(clients.items.map(async (client) => {
@@ -151,13 +177,16 @@ async function shareActivity() {
       path: `/api/v1/clients/${client.client_id}/channels?limit=100`,
       method: "GET",
     });
-    return [...channels.extended_channels, ...channels.standard_channels];
+    return [...channels.extended_channels, ...channels.standard_channels]
+      .map((channel) => ({ ...channel, client_id: client.client_id }));
   }));
   const channels = channelResponses.flat();
   await Promise.all(channels.map(async (channel) => {
     channel.payout = await payoutFor(String(channel.user_identity || ""));
   }));
   const activeKeys = new Set();
+  const activeWork = new Set();
+  const now = Date.now();
   let accepted = 0;
   let rejected = 0;
 
@@ -169,6 +198,9 @@ async function shareActivity() {
     accepted += acceptedNow;
     rejected += rejectedNow;
     activeKeys.add(key);
+    const workKey = `${channel.client_id}:${channel.channel_id}`;
+    activeWork.add(workKey);
+    trackWork(workKey, channel, now);
 
     if (previous) {
       if (acceptedNow > previous.accepted) recordShareEvent(channel, "accepted", acceptedNow - previous.accepted);
@@ -179,6 +211,9 @@ async function shareActivity() {
 
   for (const key of shareSnapshots.keys()) {
     if (!activeKeys.has(key)) shareSnapshots.delete(key);
+  }
+  for (const key of workHistory.keys()) {
+    if (!activeWork.has(key)) workHistory.delete(key);
   }
 
   return { accepted, rejected, channels, events: shareEvents };
