@@ -290,9 +290,9 @@ function renderShareScatter(container, { shares, start, end, color, format }) {
     chart.append(label);
   }
 
-  // Reference line at the current share target, labelled at the right.
+  // Reference line at the current share target, labelled at the left, away from the newest shares.
   chart.append(svg("line", { x1: margin.left, x2: width - margin.right, y1: y(target), y2: y(target), class: "chart-reference" }));
-  const targetLabel = svg("text", { x: width - margin.right, y: y(target) - 5, class: "chart-axis", "text-anchor": "end" });
+  const targetLabel = svg("text", { x: margin.left + 6, y: y(target) - 5, class: "chart-axis", "text-anchor": "start" });
   targetLabel.textContent = `share target ${format(target)}`;
   chart.append(targetLabel);
 
