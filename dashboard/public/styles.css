@@ -77,3 +77,4 @@ main { padding: 24px; }.sync-band { display: grid; grid-template-columns: 1fr au
 .worker-payout { margin: 10px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .status-online { color: var(--signal); }
 .status-stalled, .status-offline { color: var(--alert); }
+.event-row { grid-template-columns: 150px 110px 1fr auto; }

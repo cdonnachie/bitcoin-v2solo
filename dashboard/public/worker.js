@@ -45,7 +45,7 @@ function renderWorker(data) {
   if (!events.length) return;
   list.replaceChildren(...events.map((event) => {
     const row = document.createElement("div");
-    row.className = `share-row ${event.type === "block" ? "accepted" : ""}`;
+    row.className = `share-row event-row ${event.type === "block" ? "accepted" : ""}`;
     const cells = [
       ["span", new Date(event.ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })],
       ["strong", event.type === "block" ? "BLOCK FOUND" : "CONNECTED"],
