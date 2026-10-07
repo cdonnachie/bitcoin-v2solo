@@ -1,3 +1,10 @@
+# Cap Docker's own container logs (what `docker logs` shows); they otherwise grow forever.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   bitcoin-node:
     build:
@@ -25,6 +32,7 @@ services:
       - "8333:8333"
     # Give Bitcoin Core time to flush its databases; the 10s default can corrupt them.
     stop_grace_period: 10m
+    logging: *logging
     restart: unless-stopped
 
   sv2-keygen:
@@ -36,6 +44,8 @@ services:
 
   pool:
     image: stratumv2/pool_sv2@sha256:bd694b5f9263171b587e2598a85d3b3b2d7bb35b14d4353ba13ad003d4076332
+    # Also write the log to a file; the dashboard reads each share's hash from it.
+    entrypoint: ["sh", "-c", "mkdir -p /logs && exec /app/pool_sv2 --log-file /logs/pool.log"]
     container_name: bitcoin-v2solo-pool
     depends_on:
       bitcoin-node:
@@ -62,9 +72,13 @@ services:
       - type: volume
         source: bitcoin-data
         target: /data
+      - type: volume
+        source: pool-logs
+        target: /logs
     ports:
       - "${POOL_BIND_ADDRESS:-10.0.0.185}:3333:3333"
       - "127.0.0.1:9090:9090"
+    logging: *logging
     restart: unless-stopped
     profiles: ["pool"]
 
@@ -83,6 +97,7 @@ services:
     environment:
       DASHBOARD_BITAXE_HOSTS: ${DASHBOARD_BITAXE_HOSTS:-}
       DASHBOARD_FIAT: ${DASHBOARD_FIAT:-USD}
+      DASHBOARD_POOL_LOG: /var/log/pool/pool.log
       # Shown when a worker's username has no payout address, so its blocks pay the pool.
       DASHBOARD_POOL_ADDRESS: ${POOL_PAYOUT_ADDRESS:-}
     volumes:
@@ -94,10 +109,15 @@ services:
       - type: volume
         source: dashboard-data
         target: /var/lib/dashboard
+      # The pool's log file; read-write so the dashboard can empty it once read.
+      - type: volume
+        source: pool-logs
+        target: /var/log/pool
     ports:
       - "${DASHBOARD_BIND_ADDRESS:-10.0.0.185}:8080:8080"
       # Local-only listener for Tailscale Serve, which publishes the dashboard to the tailnet.
       - "127.0.0.1:8080:8080"
+    logging: *logging
     restart: unless-stopped
     profiles: ["dashboard"]
 
@@ -107,3 +127,5 @@ volumes:
     name: bitcoin-v2solo-data
   dashboard-data:
     name: bitcoin-v2solo-dashboard-data
+  pool-logs:
+    name: bitcoin-v2solo-pool-logs

@@ -3,6 +3,13 @@
 #   docker compose -f compose.testnet4.yaml up -d
 name: bitcoin-v2solo-testnet4
 
+# Cap Docker's own container logs (what `docker logs` shows); they otherwise grow forever.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   bitcoin-node:
     build:
@@ -28,10 +35,13 @@ services:
     ports:
       - "127.0.0.1:48332:48332"
     stop_grace_period: 10m
+    logging: *logging
     restart: unless-stopped
 
   pool:
     image: stratumv2/pool_sv2@sha256:bd694b5f9263171b587e2598a85d3b3b2d7bb35b14d4353ba13ad003d4076332
+    # Also write the log to a file; the dashboard reads each share's hash from it.
+    entrypoint: ["sh", "-c", "mkdir -p /logs && exec /app/pool_sv2 --log-file /logs/pool.log"]
     container_name: bitcoin-v2solo-testnet4-pool
     depends_on:
       bitcoin-node:
@@ -59,9 +69,13 @@ services:
       - type: volume
         source: bitcoin-data
         target: /data
+      - type: volume
+        source: pool-logs
+        target: /logs
     ports:
       - "${POOL_BIND_ADDRESS:-10.0.0.185}:3334:3333"
       - "127.0.0.1:9091:9090"
+    logging: *logging
     restart: unless-stopped
     profiles: ["pool"]
 
@@ -80,6 +94,7 @@ services:
     environment:
       DASHBOARD_NETWORK: testnet4
       DASHBOARD_FIAT: ${DASHBOARD_FIAT:-USD}
+      DASHBOARD_POOL_LOG: /var/log/pool/pool.log
       DASHBOARD_POOL_ADDRESS: ${TESTNET4_PAYOUT_ADDRESS:-}
       DASHBOARD_BITAXE_HOSTS: ${TESTNET4_DASHBOARD_BITAXE_HOSTS:-${DASHBOARD_BITAXE_HOSTS:-}}
     volumes:
@@ -91,8 +106,13 @@ services:
       - type: volume
         source: dashboard-data
         target: /var/lib/dashboard
+      # The pool's log file; read-write so the dashboard can empty it once read.
+      - type: volume
+        source: pool-logs
+        target: /var/log/pool
     ports:
       - "${DASHBOARD_BIND_ADDRESS:-10.0.0.185}:8081:8080"
+    logging: *logging
     restart: unless-stopped
     profiles: ["dashboard"]
 
@@ -101,3 +121,5 @@ volumes:
     name: bitcoin-v2solo-testnet4-data
   dashboard-data:
     name: bitcoin-v2solo-testnet4-dashboard-data
+  pool-logs:
+    name: bitcoin-v2solo-testnet4-pool-logs

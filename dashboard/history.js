@@ -56,12 +56,27 @@ function openHistory(file) {
     CREATE INDEX IF NOT EXISTS events_by_time ON events (ts);
     -- Minutes the dashboard was sampling: separates "worker offline" (0) from "no data" (gap).
     CREATE TABLE IF NOT EXISTS sampled (minute INTEGER PRIMARY KEY);
+    -- Individual shares from the pool log (kept 7 days). key de-duplicates re-read lines.
+    CREATE TABLE IF NOT EXISTS shares (
+      ts INTEGER NOT NULL,
+      identity TEXT NOT NULL,
+      difficulty REAL,
+      target REAL,
+      reason TEXT,
+      key TEXT NOT NULL UNIQUE
+    );
+    CREATE INDEX IF NOT EXISTS shares_by_worker ON shares (identity, ts);
+    CREATE INDEX IF NOT EXISTS shares_by_time ON shares (ts);
   `);
+  // Best share difficulty per worker-minute, added after the minutes table first shipped.
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('minutes') WHERE name = 'best'").get()) {
+    db.exec("ALTER TABLE minutes ADD COLUMN best REAL");
+  }
 
   // Any minute with share data was a sampled minute. Filling these in on every start repairs
   // databases written before the sampled table existed, so rates are never divided by too
   // few minutes.
-  db.exec("INSERT OR IGNORE INTO sampled (minute) SELECT DISTINCT minute FROM minutes");
+  db.exec("INSERT OR IGNORE INTO sampled (minute) SELECT DISTINCT minute FROM minutes WHERE work > 0");
 
   const q = {
     getMeta: db.prepare("SELECT value FROM meta WHERE key = ?"),
@@ -99,9 +114,21 @@ function openHistory(file) {
     coverage: db.prepare(`
       SELECT CAST(minute / :bucket AS INTEGER) * :bucket AS bucket, COUNT(*) AS minutes
       FROM sampled WHERE minute >= :since GROUP BY bucket ORDER BY bucket`),
+    addShare: db.prepare("INSERT OR IGNORE INTO shares (ts, identity, difficulty, target, reason, key) VALUES (?, ?, ?, ?, ?, ?)"),
+    minuteBest: db.prepare(`
+      INSERT INTO minutes (minute, identity, accepted, rejected, work, best) VALUES (?, ?, 0, 0, 0, ?)
+      ON CONFLICT (minute, identity) DO UPDATE SET best = MAX(COALESCE(minutes.best, 0), excluded.best)`),
+    workerBest: db.prepare("UPDATE workers SET best_diff = MAX(best_diff, ?) WHERE identity = ?"),
+    recentShares: db.prepare(`
+      SELECT ts, identity, difficulty, target, reason FROM shares
+      WHERE (:identity IS NULL OR identity = :identity) ORDER BY ts DESC LIMIT :limit`),
+    sharesSince: db.prepare(`
+      SELECT ts, difficulty, target FROM shares
+      WHERE identity = ? AND ts >= ? AND reason IS NULL ORDER BY ts LIMIT 50000`),
+    purgeShares: db.prepare("DELETE FROM shares WHERE ts < ?"),
     history: db.prepare(`
       SELECT CAST(minute / :bucket AS INTEGER) * :bucket AS bucket, identity,
-        SUM(accepted) AS accepted, SUM(rejected) AS rejected, SUM(work) AS work
+        SUM(accepted) AS accepted, SUM(rejected) AS rejected, SUM(work) AS work, MAX(best) AS best
       FROM minutes WHERE minute >= :since AND (:identity IS NULL OR identity = :identity)
       GROUP BY bucket, identity ORDER BY bucket`),
     purgeMinutes: db.prepare("DELETE FROM minutes WHERE minute < ?"),
@@ -206,11 +233,45 @@ function openHistory(file) {
       bucket.workers[row.identity] = {
         accepted: row.accepted,
         rejected: row.rejected,
+        best: row.best,
         hashrate: (row.work * 2 ** 32) / (bucket.minutes * 60),
       };
     }
     return { bucketMs, buckets };
   }
+
+  // Shares parsed from the pool log, each already matched to a worker identity.
+  function recordShares(shares) {
+    db.exec("BEGIN");
+    try {
+      for (const share of shares) {
+        const key = share.accepted ? share.hash : `rejected:${share.ts}:${share.client}:${share.channel}:${share.sequence}`;
+        const inserted = q.addShare.run(share.ts, share.identity, share.difficulty ?? null, share.target ?? null, share.reason ?? null, key);
+        if (inserted.changes && share.accepted) {
+          q.minuteBest.run(Math.floor(share.ts / 60_000) * 60_000, share.identity, share.difficulty);
+          q.workerBest.run(share.difficulty, share.identity);
+        }
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  function recentShares(identity = null, limit = 30) {
+    return q.recentShares.all({ identity, limit });
+  }
+
+  function sharesSince(identity, since) {
+    return q.sharesSince.all(identity, since);
+  }
+
+  // Where the share log reader got to, so a restart resumes instead of re-reading.
+  const logPosition = {
+    get: () => JSON.parse(q.getMeta.get("share_log_position")?.value || "null"),
+    set: (position) => q.setMeta.run("share_log_position", JSON.stringify(position)),
+  };
 
   function workers() {
     return q.workers.all();
@@ -227,11 +288,12 @@ function openHistory(file) {
   function purge(now) {
     q.purgeMinutes.run(now - RETENTION_MS);
     q.purgeSampled.run(now - RETENTION_MS);
+    q.purgeShares.run(now - 7 * DAY_MS);
     q.purgeConnects.run(now - RETENTION_MS);
     q.purgeChannels.run(now - 7 * DAY_MS);
   }
 
-  return { record, worker, summary, history, workers, events, purge };
+  return { record, worker, summary, history, workers, events, recordShares, recentShares, sharesSince, logPosition, purge };
 }
 
 module.exports = { openHistory };

@@ -219,7 +219,7 @@ function workerLabel(identity) {
 
 // Colors follow each worker's first-seen order, so a worker keeps its color as others come
 // and go. Past eight workers the rest fold into "Other" rather than inventing new hues.
-function workerColor(workers, identity) {
+function workerColorFor(workers, identity) {
   const index = workers.indexOf(identity);
   return index >= 0 && index < SERIES_COLORS.length ? SERIES_COLORS[index] : "#7d8a82";
 }
@@ -228,7 +228,7 @@ function chartData(history, only = null) {
   const workers = history.workers;
   const shown = only ? [only] : workers.length > SERIES_COLORS.length ? workers.slice(0, SERIES_COLORS.length - 1) : workers;
   const folded = new Set(only ? [] : workers.filter((identity) => !shown.includes(identity)));
-  const series = shown.map((identity) => ({ id: identity, label: workerLabel(identity), color: workerColor(workers, identity) }));
+  const series = shown.map((identity) => ({ id: identity, label: workerLabel(identity), color: workerColorFor(workers, identity) }));
   if (folded.size) series.push({ id: "other", label: `Other (${folded.size})`, color: "#7d8a82" });
   const buckets = history.buckets.map((bucket) => {
     const values = {};
@@ -239,4 +239,125 @@ function chartData(history, only = null) {
     return { start: bucket.start, values };
   });
   return { series, buckets };
+}
+
+// Share difficulty scatter: one dot per share on a log scale (difficulties span 1,000x and
+// more), a line at the pool's share target and the best share marked and labelled.
+function renderShareScatter(container, { shares, start, end, color, format }) {
+  container.replaceChildren();
+  container.classList.add("chart");
+  if (!shares.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No shares recorded in this period yet.";
+    container.append(empty);
+    return;
+  }
+
+  // Thin large sets: keep every notable share (4x the target or more) and a stride of the rest.
+  let points = shares;
+  if (points.length > 6000) {
+    const notable = points.filter((share) => share.difficulty >= share.target * 4);
+    const rest = points.filter((share) => share.difficulty < share.target * 4);
+    const stride = Math.ceil(rest.length / Math.max(1, 6000 - notable.length));
+    points = [...notable, ...rest.filter((_, index) => index % stride === 0)].sort((a, b) => a.ts - b.ts);
+  }
+
+  const width = Math.max(320, container.clientWidth);
+  const height = 260;
+  const margin = { top: 16, right: 12, bottom: 28, left: 72 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const best = shares.reduce((top, share) => (share.difficulty > top.difficulty ? share : top));
+  const target = shares.at(-1).target;
+  const low = 10 ** Math.floor(Math.log10(Math.min(target, ...points.map((share) => share.difficulty)) / 1.2));
+  const high = 10 ** Math.ceil(Math.log10(best.difficulty * 1.2));
+  const x = (t) => margin.left + ((t - start) / (end - start)) * plotWidth;
+  const y = (d) => margin.top + plotHeight - ((Math.log10(d) - Math.log10(low)) / (Math.log10(high) - Math.log10(low))) * plotHeight;
+
+  const chart = svg("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img" });
+  chart.setAttribute("aria-label", "Share difficulty over time");
+  for (let value = low; value <= high * 1.001; value *= 10) {
+    chart.append(svg("line", { x1: margin.left, x2: width - margin.right, y1: y(value), y2: y(value), class: value === low ? "chart-baseline" : "chart-grid" }));
+    const label = svg("text", { x: margin.left - 8, y: y(value) + 4, class: "chart-axis", "text-anchor": "end" });
+    label.textContent = format(value);
+    chart.append(label);
+  }
+  const { ticks, daily } = timeTicks(start, end);
+  for (const t of ticks) {
+    const label = svg("text", { x: x(t), y: height - 8, class: "chart-axis", "text-anchor": "middle" });
+    label.textContent = timeLabel(t, daily);
+    chart.append(label);
+  }
+
+  // Reference line at the current share target, labelled at the right.
+  chart.append(svg("line", { x1: margin.left, x2: width - margin.right, y1: y(target), y2: y(target), class: "chart-reference" }));
+  const targetLabel = svg("text", { x: width - margin.right, y: y(target) - 5, class: "chart-axis", "text-anchor": "end" });
+  targetLabel.textContent = `share target ${format(target)}`;
+  chart.append(targetLabel);
+
+  for (const share of points) chart.append(svg("circle", { cx: x(share.ts), cy: y(share.difficulty), r: 2, fill: color, class: "chart-dot" }));
+  chart.append(svg("circle", { cx: x(best.ts), cy: y(best.difficulty), r: 5, fill: color, stroke: SURFACE, "stroke-width": 2 }));
+  const bestLabel = svg("text", { x: x(best.ts), y: y(best.difficulty) - 10, class: "chart-label", "text-anchor": x(best.ts) > width - 120 ? "end" : "middle" });
+  bestLabel.textContent = `best ${format(best.difficulty)}`;
+  chart.append(bestLabel);
+
+  const marker = svg("circle", { r: 5, fill: color, stroke: SURFACE, "stroke-width": 2, visibility: "hidden" });
+  const hit = svg("rect", { x: margin.left, y: margin.top, width: plotWidth, height: plotHeight, fill: "transparent" });
+  chart.append(marker, hit);
+  container.append(chart);
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "chart-tooltip";
+  tooltip.hidden = true;
+  container.append(tooltip);
+  hit.addEventListener("pointerleave", () => {
+    tooltip.hidden = true;
+    marker.setAttribute("visibility", "hidden");
+  });
+  hit.addEventListener("pointermove", (event) => {
+    const bounds = chart.getBoundingClientRect();
+    const px = event.clientX - bounds.left;
+    const py = event.clientY - bounds.top;
+    let nearest = points[0];
+    let distance = Infinity;
+    for (const share of points) {
+      const d = (x(share.ts) - px) ** 2 + (y(share.difficulty) - py) ** 2;
+      if (d < distance) {
+        distance = d;
+        nearest = share;
+      }
+    }
+    marker.setAttribute("cx", x(nearest.ts));
+    marker.setAttribute("cy", y(nearest.difficulty));
+    marker.setAttribute("visibility", "visible");
+    const heading = Object.assign(document.createElement("strong"), { textContent: new Date(nearest.ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) });
+    const line = (label, value) => {
+      const row = document.createElement("div");
+      row.append(label, Object.assign(document.createElement("b"), { textContent: value }));
+      return row;
+    };
+    tooltip.replaceChildren(heading, line("Difficulty", format(nearest.difficulty)), line("× share target", `${(nearest.difficulty / nearest.target).toFixed(1)}×`));
+    tooltip.hidden = false;
+    const cx = x(nearest.ts);
+    tooltip.style.left = `${cx + tooltip.offsetWidth + 18 > width ? cx - tooltip.offsetWidth - 14 : cx + 14}px`;
+    tooltip.style.top = `${Math.max(0, y(nearest.difficulty) - 30)}px`;
+  });
+
+  // Table view: the highest shares in the period.
+  const details = document.createElement("details");
+  details.className = "chart-table";
+  details.append(Object.assign(document.createElement("summary"), { textContent: "Show top shares as table" }));
+  const table = document.createElement("table");
+  const head = table.createTHead().insertRow();
+  for (const label of ["Time", "Difficulty", "× share target"]) head.append(Object.assign(document.createElement("th"), { textContent: label }));
+  const body = table.createTBody();
+  for (const share of [...shares].sort((a, b) => b.difficulty - a.difficulty).slice(0, 20)) {
+    const tr = body.insertRow();
+    tr.insertCell().textContent = new Date(share.ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    tr.insertCell().textContent = format(share.difficulty);
+    tr.insertCell().textContent = `${(share.difficulty / share.target).toFixed(1)}×`;
+  }
+  details.append(table);
+  container.append(details);
 }

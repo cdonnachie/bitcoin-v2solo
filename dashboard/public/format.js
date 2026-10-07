@@ -71,3 +71,26 @@ function payoutLabel(payout) {
   if (payout.mode === "pool") return [`Pays pool ${shortAddress(payout.address)}`, payout.reason];
   return ["Rejected", payout.reason];
 }
+
+// One row of the share feed: time, result, optionally the worker, and the share's difficulty
+// with how far above the pool's share target it landed (or the reason it was rejected).
+function shareRow(share, showWorker) {
+  const row = document.createElement("div");
+  row.className = `share-row ${share.reason ? "rejected" : "accepted"}${showWorker ? "" : " no-worker"}`;
+  const identity = String(share.identity || "");
+  const worker = identity.includes(".") ? identity.slice(identity.lastIndexOf(".") + 1) : identity;
+  const result = share.reason
+    ? share.reason
+    : `${difficulty(share.difficulty)} · ${(share.difficulty / share.target).toFixed(1)}×`;
+  const cells = [
+    ["span", new Date(share.ts).toLocaleTimeString()],
+    ["strong", share.reason ? "REJECTED" : "ACCEPTED"],
+    ...(showWorker ? [["span", worker]] : []),
+    ["span", result],
+  ].map(([tag, value]) => Object.assign(document.createElement(tag), { textContent: value }));
+  if (showWorker) cells[2].title = identity;
+  cells.at(-1).className = "share-diff";
+  cells.at(-1).title = share.reason ? "Rejected by the pool" : `Difficulty ${formatter.format(share.difficulty)}; share target ${formatter.format(share.target)}`;
+  row.replaceChildren(...cells);
+  return row;
+}

@@ -97,6 +97,11 @@ function renderShareEvents(shares) {
     ? `Lifetime since ${new Date(totals.since).toLocaleDateString()}; current connections: ${formatter.format(shares.accepted)} accepted, ${formatter.format(shares.rejected)} rejected`
     : "Since the current pool connections opened";
   const ledger = byId("share-events");
+  // Individual shares from the pool log when available; otherwise per-interval counts.
+  if (shares.recent?.length) {
+    ledger.replaceChildren(...shares.recent.map((share) => shareRow(share, true)));
+    return;
+  }
   if (!shares.events.length) return;
 
   ledger.replaceChildren(...shares.events.map((event) => {

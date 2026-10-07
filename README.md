@@ -137,6 +137,12 @@ miner reconnects and dashboard rebuilds:
 - connect events (90 days), for the reconnect count shown on each worker, and
   blocks found (kept forever).
 
+The pool also writes its log to `/logs/pool.log` in the `bitcoin-v2solo-pool-logs`
+volume. The dashboard follows it for each share's hash, which gives the share's actual
+difficulty (shown in the share feed and on each worker's page), keeps individual shares
+for 7 days and the best share per minute for 90 days, and empties the file once it has
+read past 50 MB. Docker's own container logs are capped at 5 × 20 MB per service.
+
 Back it up with a consistent copy while the dashboard runs:
 
 ```bash

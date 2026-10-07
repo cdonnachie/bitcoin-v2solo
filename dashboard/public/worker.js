@@ -9,8 +9,18 @@ function ago(timestamp) {
   return timestamp ? `${duration((Date.now() - timestamp) / 1000)} ago` : "never";
 }
 
+let workerColor = SERIES_COLORS[0];
+
 function renderWorker(data) {
-  const { lifetime, channel, payout, events } = data;
+  const { lifetime, channel, payout, events, shares, workers } = data;
+  // The worker keeps the color it has on the console's pool chart.
+  const color = workerColorFor(workers, identity);
+  if (color !== workerColor) {
+    workerColor = color;
+    drawShares();
+    drawHistory();
+  }
+  if (shares?.length) byId("w-shares-list").replaceChildren(...shares.map((share) => shareRow(share, false)));
   // The full payout address, so the worker's owner can check it character by character.
   const [pays, split] = payoutLabel(payout);
   text("worker-payout", payout?.address ? `${payout.mode === "pool" ? "Pays pool" : "Pays"} ${payout.address} · ${split}` : `${pays} · ${split}`);
@@ -107,6 +117,39 @@ for (const button of byId("history-range").querySelectorAll("button")) {
     loadHistory();
   });
 }
+
+// Individual shares on a log scale, reloaded every minute.
+let sharesHours = 24;
+let sharesData = null;
+
+function drawShares() {
+  if (!sharesData) return;
+  const end = Date.now();
+  renderShareScatter(byId("shares-chart"), { shares: sharesData, start: end - sharesHours * 3600_000, end, color: workerColor, format: difficulty });
+}
+
+async function loadShares() {
+  try {
+    const response = await fetch(`/api/shares?hours=${sharesHours}&worker=${encodeURIComponent(identity)}`);
+    if (!response.ok) return;
+    sharesData = (await response.json()).shares;
+    drawShares();
+  } catch {
+    // Keep the last chart; the next refresh retries.
+  }
+}
+
+for (const button of byId("shares-range").querySelectorAll("button")) {
+  button.addEventListener("click", () => {
+    sharesHours = Number(button.dataset.hours);
+    for (const other of byId("shares-range").querySelectorAll("button")) other.setAttribute("aria-pressed", String(other === button));
+    loadShares();
+  });
+}
+
+responsiveChart(byId("shares-chart"), drawShares);
+loadShares();
+setInterval(loadShares, 60_000);
 
 responsiveChart(byId("history-chart"), drawHistory);
 refresh();

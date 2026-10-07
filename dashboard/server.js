@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
 const { openHistory } = require("./history");
+const { followShareLog } = require("./sharelog");
 
 const port = Number(process.env.PORT || 8080);
 const publicDirectory = path.join(__dirname, "public");
@@ -26,6 +27,38 @@ try {
   setInterval(() => historyDb.purge(Date.now()), 3600_000);
 } catch (error) {
   console.error(`History database unavailable: ${error.message}`);
+}
+
+// Individual shares from the pool's log file. Log lines name the pool client (connection) and
+// channel; the latest pool sample maps those to worker identities. Shares from a connection not
+// sampled yet wait up to 5 minutes for it.
+const channelIdentity = new Map();
+let pendingShares = [];
+
+function flushShares() {
+  if (!historyDb || !pendingShares.length) return;
+  const now = Date.now();
+  const ready = [];
+  const waiting = [];
+  for (const share of pendingShares) {
+    const identity = channelIdentity.get(`${share.client}:${share.channel}`);
+    if (identity) ready.push({ ...share, identity });
+    else if (now - share.ts < 5 * 60_000) waiting.push(share);
+  }
+  pendingShares = waiting;
+  if (!ready.length) return;
+  try {
+    historyDb.recordShares(ready);
+  } catch (error) {
+    console.error(`Share log update failed: ${error.message}`);
+  }
+}
+
+if (historyDb && process.env.DASHBOARD_POOL_LOG) {
+  followShareLog(process.env.DASHBOARD_POOL_LOG, historyDb.logPosition, (shares) => {
+    pendingShares.push(...shares);
+    flushShares();
+  });
 }
 
 const shareSnapshots = new Map();
@@ -230,18 +263,23 @@ async function shareActivity() {
     if (!activeWork.has(key)) workHistory.delete(key);
   }
 
+  for (const channel of channels) channelIdentity.set(`${channel.client_id}:${channel.channel_id}`, String(channel.user_identity || ""));
+  flushShares();
+
   let totals = null;
+  let recent = null;
   if (historyDb) {
     try {
       historyDb.record(channels, Number(global.uptime_secs) || 0, now);
       for (const channel of channels) channel.lifetime = historyDb.worker(String(channel.user_identity || ""), now);
       totals = historyDb.summary();
+      recent = historyDb.recentShares(null, 30);
     } catch (error) {
       console.error(`History update failed: ${error.message}`);
     }
   }
 
-  return { accepted, rejected, channels, events: shareEvents, totals };
+  return { accepted, rejected, channels, events: shareEvents, totals, recent };
 }
 
 // Building a block template is real work for Core, so reuse the summary for 30 seconds,
@@ -361,6 +399,12 @@ const server = http.createServer(async (request, response) => {
     return sendJson(200, { ...historyDb.history(hours, Date.now(), worker), workers: historyDb.workers().map((row) => row.identity) });
   }
 
+  if (url.pathname === "/api/shares") {
+    if (!historyDb) return sendJson(503, { error: "History database unavailable" });
+    const hours = Math.min(168, Math.max(1, Number(url.searchParams.get("hours")) || 24));
+    return sendJson(200, { shares: historyDb.sharesSince(url.searchParams.get("worker") || "", Date.now() - hours * 3600_000) });
+  }
+
   if (url.pathname === "/api/worker") {
     if (!historyDb) return sendJson(503, { error: "History database unavailable" });
     const identity = url.searchParams.get("id") || "";
@@ -374,6 +418,7 @@ const server = http.createServer(async (request, response) => {
       channel,
       payout: channel?.payout || await payoutFor(identity),
       events: historyDb.events(identity, 50),
+      shares: historyDb.recentShares(identity, 40),
       workers: historyDb.workers().map((row) => row.identity),
     });
   }

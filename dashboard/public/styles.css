@@ -78,3 +78,9 @@ main { padding: 24px; }.sync-band { display: grid; grid-template-columns: 1fr au
 .status-online { color: var(--signal); }
 .status-stalled, .status-offline { color: var(--alert); }
 .event-row { grid-template-columns: 150px 110px 1fr auto; }
+.chart-dot { opacity: .55; }
+.chart-reference { stroke: var(--muted); stroke-width: 1; }
+.chart-label { fill: var(--ink); font-size: 11px; }
+.share-row .share-diff { font-variant-numeric: tabular-nums; }
+.share-row.no-worker { grid-template-columns: 90px 92px 1fr; }
+.share-row.no-worker .share-diff { text-align: right; }
