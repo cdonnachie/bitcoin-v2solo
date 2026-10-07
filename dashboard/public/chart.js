@@ -81,7 +81,8 @@ function renderTimeChart(container, { series, buckets, bucketMs, start, end, sta
   });
   const step = niceStep(Math.max(...rows.map((row) => row.total), 1) * 1.05, 4);
   const yMax = Math.ceil((Math.max(...rows.map((row) => row.total), 1) * 1.05) / step) * step;
-  const x = (t) => margin.left + ((t + bucketMs / 2 - start) / (end - start)) * plotWidth;
+  // Points sit at bucket midpoints, clamped to now so the bucket in progress stays in the plot.
+  const x = (t) => margin.left + ((Math.min(t + bucketMs / 2, end) - start) / (end - start)) * plotWidth;
   const y = (value) => margin.top + plotHeight - (value / yMax) * plotHeight;
 
   const chart = svg("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img" });
