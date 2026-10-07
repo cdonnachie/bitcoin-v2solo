@@ -347,11 +347,35 @@ function contentType(file) {
 }
 
 const server = http.createServer(async (request, response) => {
-  if (request.url.startsWith("/api/history")) {
-    const hours = Math.min(2160, Math.max(1, Number(new URL(request.url, "http://dashboard").searchParams.get("hours")) || 24));
-    response.writeHead(historyDb ? 200 : 503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    response.end(JSON.stringify(historyDb ? historyDb.history(hours, Date.now()) : { error: "History database unavailable" }));
-    return;
+  const url = new URL(request.url, "http://dashboard");
+  const sendJson = (code, body) => {
+    response.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    response.end(JSON.stringify(body));
+  };
+
+  if (url.pathname === "/api/history") {
+    if (!historyDb) return sendJson(503, { error: "History database unavailable" });
+    const hours = Math.min(2160, Math.max(1, Number(url.searchParams.get("hours")) || 24));
+    const worker = url.searchParams.get("worker");
+    // Workers are listed in first-seen order, which fixes each one's chart color.
+    return sendJson(200, { ...historyDb.history(hours, Date.now(), worker), workers: historyDb.workers().map((row) => row.identity) });
+  }
+
+  if (url.pathname === "/api/worker") {
+    if (!historyDb) return sendJson(503, { error: "History database unavailable" });
+    const identity = url.searchParams.get("id") || "";
+    const now = Date.now();
+    const lifetime = historyDb.worker(identity, now);
+    if (!lifetime) return sendJson(404, { error: "Unknown worker" });
+    const channel = (latestShares.value?.channels || []).find((item) => item.user_identity === identity) || null;
+    return sendJson(200, {
+      identity,
+      lifetime,
+      channel,
+      payout: channel?.payout || await payoutFor(identity),
+      events: historyDb.events(identity, 50),
+      workers: historyDb.workers().map((row) => row.identity),
+    });
   }
 
   if (request.url === "/api/status") {
@@ -361,9 +385,18 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  const requestedPath = request.url === "/" ? "index.html" : request.url.slice(1);
-  const safePath = path.normalize(requestedPath).replace(/^\.\.[/\\]/, "");
-  const file = path.join(publicDirectory, safePath);
+  // Resolve the path and refuse anything outside public/ (e.g. /../../etc/passwd).
+  let file = null;
+  try {
+    file = path.resolve(publicDirectory, decodeURIComponent(url.pathname === "/" ? "index.html" : url.pathname.slice(1)));
+  } catch {
+    // Malformed percent-encoding.
+  }
+  if (!file || !file.startsWith(publicDirectory + path.sep)) {
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Not found");
+    return;
+  }
 
   try {
     const content = await fs.readFile(file);

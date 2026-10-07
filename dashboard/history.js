@@ -54,6 +54,8 @@ function openHistory(file) {
       detail TEXT
     );
     CREATE INDEX IF NOT EXISTS events_by_time ON events (ts);
+    -- Minutes the dashboard was sampling: separates "worker offline" (0) from "no data" (gap).
+    CREATE TABLE IF NOT EXISTS sampled (minute INTEGER PRIMARY KEY);
   `);
 
   const q = {
@@ -86,11 +88,19 @@ function openHistory(file) {
         COALESCE(SUM(accepted), 0) AS accepted, COALESCE(SUM(rejected), 0) AS rejected, MIN(first_seen) AS since
       FROM workers`),
     blocks: db.prepare("SELECT ts, identity, detail FROM events WHERE type = 'block' ORDER BY ts DESC"),
+    workers: db.prepare("SELECT * FROM workers ORDER BY first_seen, identity"),
+    events: db.prepare("SELECT ts, type, detail FROM events WHERE identity = ? ORDER BY ts DESC LIMIT ?"),
+    markSampled: db.prepare("INSERT OR IGNORE INTO sampled (minute) VALUES (?)"),
+    coverage: db.prepare(`
+      SELECT CAST(minute / :bucket AS INTEGER) * :bucket AS bucket, COUNT(*) AS minutes
+      FROM sampled WHERE minute >= :since GROUP BY bucket ORDER BY bucket`),
     history: db.prepare(`
-      SELECT (minute / :bucket) * :bucket AS bucket, identity,
+      SELECT CAST(minute / :bucket AS INTEGER) * :bucket AS bucket, identity,
         SUM(accepted) AS accepted, SUM(rejected) AS rejected, SUM(work) AS work
-      FROM minutes WHERE minute >= :since GROUP BY bucket, identity ORDER BY bucket`),
+      FROM minutes WHERE minute >= :since AND (:identity IS NULL OR identity = :identity)
+      GROUP BY bucket, identity ORDER BY bucket`),
     purgeMinutes: db.prepare("DELETE FROM minutes WHERE minute < ?"),
+    purgeSampled: db.prepare("DELETE FROM sampled WHERE minute < ?"),
     purgeConnects: db.prepare("DELETE FROM events WHERE type = 'connect' AND ts < ?"),
     purgeChannels: db.prepare("DELETE FROM channels WHERE seen < ?"),
   };
@@ -109,6 +119,7 @@ function openHistory(file) {
     const minute = Math.floor(now / 60_000) * 60_000;
     db.exec("BEGIN");
     try {
+      q.markSampled.run(minute);
       for (const channel of channels) {
         const identity = String(channel.user_identity || "");
         const key = `${run}:${channel.client_id}:${channel.channel_id}`;
@@ -169,26 +180,53 @@ function openHistory(file) {
     };
   }
 
-  // Hashrate per worker per bucket: each unit of share difficulty represents 2^32 hashes.
-  function history(hours, now) {
-    const bucketMs = hours <= 24 ? 60_000 : hours <= 168 ? 10 * 60_000 : 3600_000;
-    return {
-      bucketMs,
-      rows: q.history.all({ bucket: bucketMs, since: now - hours * 3600_000 }).map((row) => ({
-        ...row,
-        hashrate: (row.work * 2 ** 32) / (bucketMs / 1000),
-      })),
-    };
+  // Hashrate per worker per bucket. Each unit of share difficulty represents 2^32 hashes, and
+  // the rate is divided by the minutes actually sampled, so a partly covered bucket (the
+  // current one, or one spanning a dashboard outage) is not under-reported. Buckets with no
+  // sampled minutes are omitted, so charts show a gap instead of a false zero.
+  function history(hours, now, identity = null) {
+    const bucketMs = hours <= 24 ? 10 * 60_000 : hours <= 168 ? 3600_000 : 6 * 3600_000;
+    const params = { bucket: bucketMs, since: Math.floor((now - hours * 3600_000) / bucketMs) * bucketMs };
+    // The minute in progress counts only for the part that has elapsed.
+    const currentMinute = Math.floor(now / 60_000) * 60_000;
+    const buckets = q.coverage.all(params).map((row) => {
+      const inProgress = currentMinute >= row.bucket && currentMinute < row.bucket + bucketMs;
+      const minutes = inProgress ? Math.max(row.minutes - 1 + (now - currentMinute) / 60_000, 1 / 6) : row.minutes;
+      return { start: row.bucket, minutes, workers: {} };
+    });
+    const byStart = new Map(buckets.map((bucket) => [bucket.start, bucket]));
+    for (const row of q.history.all({ ...params, identity })) {
+      const bucket = byStart.get(row.bucket);
+      if (!bucket) continue;
+      bucket.workers[row.identity] = {
+        accepted: row.accepted,
+        rejected: row.rejected,
+        hashrate: (row.work * 2 ** 32) / (bucket.minutes * 60),
+      };
+    }
+    return { bucketMs, buckets };
+  }
+
+  function workers() {
+    return q.workers.all();
+  }
+
+  function events(identity, limit = 50) {
+    return q.events.all(identity, limit).map((event) => ({
+      ...event,
+      detail: event.type === "block" ? JSON.parse(event.detail || "{}") : event.detail,
+    }));
   }
 
   // Blocks found are kept forever; samples and connect events for 90 days.
   function purge(now) {
     q.purgeMinutes.run(now - RETENTION_MS);
+    q.purgeSampled.run(now - RETENTION_MS);
     q.purgeConnects.run(now - RETENTION_MS);
     q.purgeChannels.run(now - 7 * DAY_MS);
   }
 
-  return { record, worker, summary, history, purge };
+  return { record, worker, summary, history, workers, events, purge };
 }
 
 module.exports = { openHistory };

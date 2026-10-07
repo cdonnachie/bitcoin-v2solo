@@ -1,63 +1,3 @@
-const formatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-
-function byId(id) {
-  return document.getElementById(id);
-}
-
-function duration(seconds) {
-  const units = [[86400, "d"], [3600, "h"], [60, "m"]];
-  for (const [size, label] of units) {
-    if (seconds >= size) return `${Math.floor(seconds / size)}${label}`;
-  }
-  return `${Math.floor(seconds)}s`;
-}
-
-function hashrate(value) {
-  const units = ["H/s", "kH/s", "MH/s", "GH/s", "TH/s", "PH/s"];
-  let index = 0;
-  let rate = Math.max(0, Number(value) || 0);
-  while (rate >= 1000 && index < units.length - 1) {
-    rate /= 1000;
-    index += 1;
-  }
-  return `${formatter.format(rate)} ${units[index]}`;
-}
-
-function difficulty(value) {
-  const units = ["", "K", "M", "G", "T", "P", "E"];
-  let index = 0;
-  let amount = Math.max(0, Number(value) || 0);
-  while (amount >= 1000 && index < units.length - 1) {
-    amount /= 1000;
-    index += 1;
-  }
-  return `${formatter.format(amount)}${units[index]}`;
-}
-
-// Difficulty 1 corresponds to this target; a share's difficulty is that divided by its target.
-const DIFFICULTY_1_TARGET = 0xffffn << 208n;
-
-function targetDifficulty(targetHex) {
-  const target = BigInt(`0x${targetHex}`);
-  return target ? Number(DIFFICULTY_1_TARGET * 1000n / target) / 1000 : 0;
-}
-
-function percent(value) {
-  const amount = value * 100;
-  if (amount >= 1 || amount === 0) return `${formatter.format(amount)}%`;
-  // Fixed notation with three significant digits, e.g. 0.000000131% rather than 1.31e-7%.
-  const decimals = Math.min(20, Math.max(2, 2 - Math.floor(Math.log10(amount))));
-  return `${amount.toFixed(decimals)}%`;
-}
-
-function bytes(value) {
-  return `${formatter.format((Number(value) || 0) / 1_000_000_000)} GB`;
-}
-
-function text(id, value) {
-  byId(id).textContent = value;
-}
-
 function renderMiners(bitaxes) {
   const miners = byId("miners");
   // Only shown when DASHBOARD_BITAXE_HOSTS lists miners this dashboard can reach.
@@ -84,18 +24,6 @@ function renderMiners(bitaxes) {
       ${miner.online ? `<div class="miner-best"><span>Errors ${formatter.format(Number(info.errorPercentage) || 0)}%</span><span>${info.frequency ?? "--"} MHz @ ${info.coreVoltage ?? "--"} mV</span></div>` : ""}`;
     return card;
   }));
-}
-
-function shortAddress(address) {
-  return address && address.length > 20 ? `${address.slice(0, 10)}…${address.slice(-6)}` : address || "--";
-}
-
-function payoutLabel(payout) {
-  if (!payout) return ["--", ""];
-  if (payout.mode === "miner") return [`Pays ${shortAddress(payout.address)}`, "100% to miner"];
-  if (payout.mode === "split") return [`Pays ${shortAddress(payout.address)}`, `${payout.minerPercent}% miner · ${payout.poolPercent}% pool`];
-  if (payout.mode === "pool") return [`Pays pool ${shortAddress(payout.address)}`, payout.reason];
-  return ["Rejected", payout.reason];
 }
 
 function renderWorkers(channels) {
@@ -150,6 +78,11 @@ Rejected on this connection: ${reasons}` : ""}`],
       if (title) cell.title = title;
       return cell;
     });
+    // The worker name opens that worker's own page.
+    const link = document.createElement("a");
+    link.href = `worker.html?id=${encodeURIComponent(user)}`;
+    link.textContent = cells[0].textContent;
+    cells[0].replaceChildren(link);
     row.replaceChildren(...cells);
     return row;
   }));
@@ -307,6 +240,48 @@ async function refresh() {
     button.disabled = false;
   }
 }
+
+// Pool hashrate history, reloaded every minute; hidden when the history database is unavailable.
+let historyHours = 24;
+let historyData = null;
+
+function drawHistory() {
+  if (!historyData) return;
+  const end = Date.now();
+  const { series, buckets } = chartData(historyData);
+  renderTimeChart(byId("history-chart"), {
+    series,
+    buckets,
+    bucketMs: historyData.bucketMs,
+    start: end - historyHours * 3600_000,
+    end,
+    stacked: true,
+    format: hashrate,
+  });
+}
+
+async function loadHistory() {
+  try {
+    const response = await fetch(`/api/history?hours=${historyHours}`);
+    byId("history-panel").hidden = !response.ok;
+    if (!response.ok) return;
+    historyData = await response.json();
+    drawHistory();
+  } catch {
+    // Keep the last chart; the next refresh retries.
+  }
+}
+
+for (const button of byId("history-range").querySelectorAll("button")) {
+  button.addEventListener("click", () => {
+    historyHours = Number(button.dataset.hours);
+    for (const other of byId("history-range").querySelectorAll("button")) other.setAttribute("aria-pressed", String(other === button));
+    loadHistory();
+  });
+}
+responsiveChart(byId("history-chart"), drawHistory);
+loadHistory();
+setInterval(loadHistory, 60_000);
 
 byId("refresh").addEventListener("click", refresh);
 refresh();

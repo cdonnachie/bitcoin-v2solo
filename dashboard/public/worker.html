@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pool Worker</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow"><a class="back-link" href="./">← MINING CONSOLE</a> · POOL WORKER</p>
+        <h1 id="worker-name">Worker</h1>
+        <p class="worker-payout" id="worker-payout">&nbsp;</p>
+      </div>
+      <div class="header-state">
+        <span id="connection-dot" class="status-dot"></span>
+        <span id="connection-label">Connecting</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="metrics" aria-label="Worker status">
+        <article class="metric"><span>Hashrate</span><strong id="w-hashrate">--</strong><small id="w-hashrate-detail">measured from submitted work</small></article>
+        <article class="metric"><span>Status</span><strong id="w-status">--</strong><small id="w-status-detail">&nbsp;</small></article>
+        <article class="metric"><span>Shares</span><strong id="w-shares">--</strong><small id="w-shares-detail">&nbsp;</small></article>
+        <article class="metric"><span>Best share</span><strong id="w-best">--</strong><small id="w-best-detail">all time</small></article>
+        <article class="metric"><span>Blocks found</span><strong id="w-blocks">--</strong><small>all time</small></article>
+        <article class="metric"><span>Connections</span><strong id="w-connects">--</strong><small>last 24 hours</small></article>
+        <article class="metric"><span>First seen</span><strong id="w-first">--</strong><small id="w-first-detail">&nbsp;</small></article>
+        <article class="metric"><span>Share difficulty</span><strong id="w-share-diff">--</strong><small>pool's current share target</small></article>
+      </section>
+
+      <section class="panel" aria-labelledby="w-history-heading">
+        <div class="section-heading">
+          <div><p class="eyebrow">HISTORY</p><h2 id="w-history-heading">Hashrate</h2></div>
+          <div class="range-buttons" id="history-range">
+            <button type="button" data-hours="24" aria-pressed="true">24H</button>
+            <button type="button" data-hours="168" aria-pressed="false">7D</button>
+            <button type="button" data-hours="720" aria-pressed="false">30D</button>
+          </div>
+        </div>
+        <div id="history-chart"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="w-events-heading">
+        <div class="section-heading">
+          <div><p class="eyebrow">LOCAL SV2 POOL</p><h2 id="w-events-heading">Connections &amp; Blocks</h2></div>
+          <span id="w-event-count" class="count-label">&nbsp;</span>
+        </div>
+        <div id="w-events" class="share-events"><p class="empty">No events recorded yet.</p></div>
+      </section>
+    </main>
+    <script src="format.js"></script>
+    <script src="chart.js"></script>
+    <script src="worker.js"></script>
+  </body>
+</html>

@@ -61,6 +61,18 @@
         <article class="metric"><span>Share difficulty</span><strong id="share-difficulty">--</strong><small>pool's current share target</small></article>
       </section>
 
+      <section class="panel" id="history-panel" aria-labelledby="history-heading">
+        <div class="section-heading">
+          <div><p class="eyebrow">HISTORY</p><h2 id="history-heading">Pool Hashrate by Worker</h2></div>
+          <div class="range-buttons" id="history-range">
+            <button type="button" data-hours="24" aria-pressed="true">24H</button>
+            <button type="button" data-hours="168" aria-pressed="false">7D</button>
+            <button type="button" data-hours="720" aria-pressed="false">30D</button>
+          </div>
+        </div>
+        <div id="history-chart"></div>
+      </section>
+
       <section class="panel" aria-labelledby="shares-heading">
         <div class="section-heading">
           <div><p class="eyebrow">LOCAL SV2 POOL</p><h2 id="shares-heading">Share Submissions</h2></div>
@@ -98,6 +110,8 @@
         </dl>
       </section>
     </main>
+    <script src="format.js"></script>
+    <script src="chart.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
