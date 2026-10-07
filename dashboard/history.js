@@ -58,6 +58,11 @@ function openHistory(file) {
     CREATE TABLE IF NOT EXISTS sampled (minute INTEGER PRIMARY KEY);
   `);
 
+  // Any minute with share data was a sampled minute. Filling these in on every start repairs
+  // databases written before the sampled table existed, so rates are never divided by too
+  // few minutes.
+  db.exec("INSERT OR IGNORE INTO sampled (minute) SELECT DISTINCT minute FROM minutes");
+
   const q = {
     getMeta: db.prepare("SELECT value FROM meta WHERE key = ?"),
     setMeta: db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value"),
