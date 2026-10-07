@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
+const { openHistory } = require("./history");
 
 const port = Number(process.env.PORT || 8080);
 const publicDirectory = path.join(__dirname, "public");
@@ -17,6 +18,16 @@ const chains = {
 const networkName = process.env.DASHBOARD_NETWORK || "mainnet";
 const chain = chains[networkName];
 if (!chain) throw new Error(`Unsupported DASHBOARD_NETWORK: ${networkName}`);
+// Lifetime history; the dashboard keeps working without it if the database cannot be opened.
+let historyDb = null;
+try {
+  historyDb = openHistory(process.env.DASHBOARD_DB || "/var/lib/dashboard/history.db");
+  historyDb.purge(Date.now());
+  setInterval(() => historyDb.purge(Date.now()), 3600_000);
+} catch (error) {
+  console.error(`History database unavailable: ${error.message}`);
+}
+
 const shareSnapshots = new Map();
 const shareEvents = [];
 
@@ -169,7 +180,10 @@ function trackWork(key, channel, now) {
 }
 
 async function shareActivity() {
-  const clients = await requestJson({ host: "pool", port: 9090, path: "/api/v1/clients?limit=100", method: "GET" });
+  const [clients, global] = await Promise.all([
+    requestJson({ host: "pool", port: 9090, path: "/api/v1/clients?limit=100", method: "GET" }),
+    requestJson({ host: "pool", port: 9090, path: "/api/v1/global", method: "GET" }),
+  ]);
   const channelResponses = await Promise.all(clients.items.map(async (client) => {
     const channels = await requestJson({
       host: "pool",
@@ -216,7 +230,18 @@ async function shareActivity() {
     if (!activeWork.has(key)) workHistory.delete(key);
   }
 
-  return { accepted, rejected, channels, events: shareEvents };
+  let totals = null;
+  if (historyDb) {
+    try {
+      historyDb.record(channels, Number(global.uptime_secs) || 0, now);
+      for (const channel of channels) channel.lifetime = historyDb.worker(String(channel.user_identity || ""), now);
+      totals = historyDb.summary();
+    } catch (error) {
+      console.error(`History update failed: ${error.message}`);
+    }
+  }
+
+  return { accepted, rejected, channels, events: shareEvents, totals };
 }
 
 // Building a block template is real work for Core, so reuse the summary for 30 seconds,
@@ -322,6 +347,13 @@ function contentType(file) {
 }
 
 const server = http.createServer(async (request, response) => {
+  if (request.url.startsWith("/api/history")) {
+    const hours = Math.min(2160, Math.max(1, Number(new URL(request.url, "http://dashboard").searchParams.get("hours")) || 24));
+    response.writeHead(historyDb ? 200 : 503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    response.end(JSON.stringify(historyDb ? historyDb.history(hours, Date.now()) : { error: "History database unavailable" }));
+    return;
+  }
+
   if (request.url === "/api/status") {
     const payload = await status();
     response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });

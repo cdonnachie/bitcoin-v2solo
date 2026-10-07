@@ -125,6 +125,24 @@ tailscale serve status
 
 This persists across reboots. Turn it off with `tailscale serve --https=443 off`.
 
+### History database
+
+The dashboard keeps a small SQLite database in the `bitcoin-v2solo-dashboard-data`
+volume (`/var/lib/dashboard/history.db`), so worker totals survive pool restarts,
+miner reconnects and dashboard rebuilds:
+
+- lifetime accepted and rejected shares, total work, all-time best share and blocks
+  found for each worker (by username);
+- per-minute share work for each worker, kept 90 days (`/api/history?hours=24`);
+- connect events (90 days), for the reconnect count shown on each worker, and
+  blocks found (kept forever).
+
+Back it up with a consistent copy while the dashboard runs:
+
+```bash
+docker run --rm -v bitcoin-v2solo-dashboard-data:/v alpine sh -c   "apk add -q sqlite && sqlite3 /v/history.db '.backup /v/history-backup.db'"
+```
+
 To value the next block reward, the dashboard fetches the BTC price from
 `https://mempool.space/api/v1/prices` once an hour; this is its only request
 outside your network. Set `DASHBOARD_FIAT` in `.env` to choose the currency

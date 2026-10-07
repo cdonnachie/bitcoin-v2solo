@@ -123,17 +123,27 @@ function renderWorkers(channels) {
       ? `Measured from submitted work over ${duration(channel.measured_window_secs)}; pool estimate ${hashrate(channel.nominal_hashrate)}`
       : `Pool estimate; measured rate appears after a minute`;
     const reasons = Object.entries(channel.shares_rejected_by_reason || {}).map(([reason, count]) => `${reason}: ${count}`).join(", ");
+    // Lifetime figures survive reconnects and restarts; the connection's own counters reset.
+    const life = channel.lifetime;
+    const accepted = life ? life.accepted : channel.shares_accepted || 0;
+    const rejected = life ? life.rejected : channel.shares_rejected || 0;
+    const bestDiff = life ? Math.max(life.best_diff, channel.best_diff || 0) : channel.best_diff;
+    const thisConnection = `This connection: A ${formatter.format(channel.shares_accepted || 0)} · R ${formatter.format(channel.shares_rejected || 0)} · best ${difficulty(channel.best_diff)}`;
+    const reconnects = life && life.connects24h > 1 ? ` ↻${life.connects24h - 1}` : "";
     const user = String(channel.user_identity || "");
     const worker = user.includes(".") ? user.slice(user.lastIndexOf(".") + 1) : user.split("/").pop() || `channel ${channel.channel_id}`;
     const [pays, detail] = payoutLabel(channel.payout);
     const cells = [
-      ["strong", worker, user],
+      ["strong", `${worker}${reconnects}`, life ? `${user}
+${life.connects24h} connection${life.connects24h === 1 ? "" : "s"} in the last 24 hours` : user],
       ["span", pays, payout.address || ""],
       ["span", detail, ""],
       ["span", rate, rateTitle],
       ["span", lastShare ? `${duration((Date.now() - lastShare) / 1000)} ago` : stale ? "no shares" : "waiting", "Time since this worker last submitted a share"],
-      ["span", `A ${formatter.format(channel.shares_accepted || 0)} · R ${formatter.format(channel.shares_rejected || 0)}`, reasons ? `Rejected: ${reasons}` : "No rejected shares"],
-      ["span", `Best ${difficulty(channel.best_diff)}`, ""],
+      ["span", `A ${formatter.format(accepted)} · R ${formatter.format(rejected)}`, `${life ? `Lifetime since ${new Date(life.first_seen).toLocaleDateString()}
+` : ""}${thisConnection}${reasons ? `
+Rejected on this connection: ${reasons}` : ""}`],
+      ["span", `Best ${difficulty(bestDiff)}`, life ? "All-time best share" : "Best share on this connection"],
     ].map(([tag, value, title]) => {
       const cell = document.createElement(tag);
       cell.textContent = value;
@@ -146,8 +156,13 @@ function renderWorkers(channels) {
 }
 
 function renderShareEvents(shares) {
-  text("shares-accepted", formatter.format(shares.accepted));
-  text("shares-rejected", formatter.format(shares.rejected));
+  // Lifetime totals from the history database; otherwise counts since the current connections opened.
+  const totals = shares.totals;
+  text("shares-accepted", formatter.format(totals ? totals.accepted : shares.accepted));
+  text("shares-rejected", formatter.format(totals ? totals.rejected : shares.rejected));
+  byId("shares-accepted").parentElement.parentElement.title = totals
+    ? `Lifetime since ${new Date(totals.since).toLocaleDateString()}; current connections: ${formatter.format(shares.accepted)} accepted, ${formatter.format(shares.rejected)} rejected`
+    : "Since the current pool connections opened";
   const ledger = byId("share-events");
   if (!shares.events.length) return;
 
@@ -218,13 +233,16 @@ function renderReward(reward, price) {
   text("reward-height", reward ? formatter.format(reward.height) : "--");
 }
 
-function renderTarget(mining, blockchain, channels, chain) {
-  const best = Math.max(0, ...channels.map((channel) => Number(channel.best_diff) || 0));
+function renderTarget(mining, blockchain, channels, chain, totals) {
+  const sessionBest = Math.max(0, ...channels.map((channel) => Number(channel.best_diff) || 0));
+  // Lifetime best from the history database when available, else this pool run.
+  const best = Math.max(sessionBest, Number(totals?.best) || 0);
   const target = Number(mining?.next?.difficulty ?? mining?.difficulty) || 0;
   const shareTargets = channels.map((channel) => targetDifficulty(channel.target_hex)).filter(Boolean);
-  text("best-share", channels.length ? difficulty(best) : "--");
+  text("best-share", best ? difficulty(best) : "--");
+  text("best-share-detail", totals ? `all time · ${difficulty(sessionBest)} since the pool started` : "since the pool started");
   text("block-target", target ? difficulty(target) : "--");
-  text("best-progress", target && channels.length ? percent(best / target) : "--");
+  text("best-progress", target && best ? percent(best / target) : "--");
   text("share-difficulty", shareTargets.length ? difficulty(Math.min(...shareTargets)) : "--");
 
   let detail = mining?.next ? `next block, height ${formatter.format(mining.next.height)}` : "next block difficulty";
@@ -263,7 +281,7 @@ function render(status) {
   text("disk-usage", bytes(blockchain.size_on_disk));
   text("difficulty", formatter.format(blockchain.difficulty));
   text("updated-at", `Updated ${new Date(updatedAt).toLocaleTimeString()}`);
-  renderTarget(status.mining, blockchain, shares.channels || [], status.chain);
+  renderTarget(status.mining, blockchain, shares.channels || [], status.chain, shares.totals);
   renderReward(status.reward, status.price);
   const target = Number(status.mining?.next?.difficulty ?? status.mining?.difficulty) || 0;
   text("reward-odds", blockOdds(target, Number(pool.sv2_clients.total_hashrate) || 0));

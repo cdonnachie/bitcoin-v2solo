@@ -87,6 +87,10 @@ services:
         source: bitcoin-data
         target: /data
         read_only: true
+      # Lifetime worker totals and history (SQLite).
+      - type: volume
+        source: dashboard-data
+        target: /var/lib/dashboard
     ports:
       - "${DASHBOARD_BIND_ADDRESS:-10.0.0.185}:8081:8080"
     restart: unless-stopped
@@ -95,3 +99,5 @@ services:
 volumes:
   bitcoin-data:
     name: bitcoin-v2solo-testnet4-data
+  dashboard-data:
+    name: bitcoin-v2solo-testnet4-dashboard-data
