@@ -326,6 +326,10 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
             expectedChallenge: pending.challenge,
             expectedOrigin: pending.origin,
             expectedRPID: pending.rpID,
+            // Matches userVerification: "preferred" in the options: a PIN or biometric is used when
+            // the authenticator has one, but password managers such as Dashlane do not report it.
+            // The user must still be present (a tap, click or unlock).
+            requireUserVerification: false,
             credential: { id: key.id, publicKey: Buffer.from(key.public_key, "base64url"), counter: key.counter, transports: key.transports ? JSON.parse(key.transports) : undefined },
           });
           if (!result.verified) {
@@ -396,6 +400,7 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
             expectedChallenge: pending.challenge,
             expectedOrigin: pending.origin,
             expectedRPID: pending.rpID,
+            requireUserVerification: false,
           });
           if (!result.verified) return send(response, 400, { error: "Passkey registration failed" }), true;
           const info = result.registrationInfo.credential;
