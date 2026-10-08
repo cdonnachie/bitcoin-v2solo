@@ -3,6 +3,7 @@ const http = require("node:http");
 const path = require("node:path");
 const { openHistory } = require("./history");
 const { followShareLog } = require("./sharelog");
+const { poolApi } = require("./pool-api");
 
 const port = Number(process.env.PORT || 8080);
 const publicDirectory = path.join(__dirname, "public");
@@ -212,22 +213,11 @@ function trackWork(key, channel, now) {
   channel.first_seen_at = new Date(entry.firstSeen).toISOString();
 }
 
+// All pool data goes through pool-api.js, which maps the raw monitoring API to stable fields.
+const poolMonitor = poolApi((path) => requestJson({ host: "pool", port: 9090, path, method: "GET" }));
+
 async function shareActivity() {
-  const [clients, global] = await Promise.all([
-    requestJson({ host: "pool", port: 9090, path: "/api/v1/clients?limit=100", method: "GET" }),
-    requestJson({ host: "pool", port: 9090, path: "/api/v1/global", method: "GET" }),
-  ]);
-  const channelResponses = await Promise.all(clients.items.map(async (client) => {
-    const channels = await requestJson({
-      host: "pool",
-      port: 9090,
-      path: `/api/v1/clients/${client.client_id}/channels?limit=100`,
-      method: "GET",
-    });
-    return [...channels.extended_channels, ...channels.standard_channels]
-      .map((channel) => ({ ...channel, client_id: client.client_id }));
-  }));
-  const channels = channelResponses.flat();
+  const [channels, global] = await Promise.all([poolMonitor.channels(), poolMonitor.global()]);
   await Promise.all(channels.map(async (channel) => {
     channel.payout = await payoutFor(String(channel.user_identity || ""));
   }));
@@ -270,7 +260,7 @@ async function shareActivity() {
   let recent = null;
   if (historyDb) {
     try {
-      historyDb.record(channels, Number(global.uptime_secs) || 0, now);
+      historyDb.record(channels, global.uptime_secs, now);
       for (const channel of channels) channel.lifetime = historyDb.worker(String(channel.user_identity || ""), now);
       totals = historyDb.summary();
       recent = historyDb.recentShares(null, 30);
@@ -355,8 +345,8 @@ async function status() {
     capture("Bitcoin Core mining", () => bitcoinRpc("getmininginfo")),
     capture("Bitcoin Core block template", blockReward),
     capture("Bitcoin Core network", () => bitcoinRpc("getnetworkinfo")),
-    capture("Pool statistics", () => requestJson({ host: "pool", port: 9090, path: "/api/v1/global", method: "GET" })),
-    capture("Pool health", () => requestJson({ host: "pool", port: 9090, path: "/api/v1/health", method: "GET" })),
+    capture("Pool statistics", poolMonitor.global),
+    capture("Pool health", poolMonitor.health),
     capture("Bitaxe fleet", () => Promise.all(bitaxeHosts.map(bitaxeStatus))),
     latestShares,
   ]);

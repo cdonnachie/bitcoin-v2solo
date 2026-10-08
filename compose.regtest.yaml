@@ -38,7 +38,8 @@ services:
     restart: unless-stopped
 
   pool:
-    image: stratumv2/pool_sv2@sha256:bd694b5f9263171b587e2598a85d3b3b2d7bb35b14d4353ba13ad003d4076332
+    # POOL_IMAGE lets scripts/check-pool-image.sh try a candidate image on regtest.
+    image: ${POOL_IMAGE:-stratumv2/pool_sv2@sha256:bd694b5f9263171b587e2598a85d3b3b2d7bb35b14d4353ba13ad003d4076332}
     # Also write the log to a file; the dashboard reads each share's hash from it.
     entrypoint: ["sh", "-c", "mkdir -p /logs && exec /app/pool_sv2 --log-file /logs/pool.log"]
     container_name: bitcoin-v2solo-regtest-pool

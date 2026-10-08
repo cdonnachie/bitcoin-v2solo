@@ -195,7 +195,7 @@ function renderTarget(mining, blockchain, channels, chain, totals) {
 function render(status) {
   const blockchain = status.blockchain || { verificationprogress: 0, initialblockdownload: true, blocks: 0, headers: 0, size_on_disk: 0, difficulty: 0 };
   const network = status.network || { connections: 0, networkactive: false };
-  const pool = status.pool || { sv2_clients: { total_clients: 0, total_channels: 0, total_hashrate: 0 }, uptime_secs: 0 };
+  const pool = status.pool || { total_clients: 0, total_channels: 0, total_hashrate: 0, uptime_secs: 0 };
   const shares = status.shares || { accepted: 0, rejected: 0, events: [] };
   const { bitaxes, updatedAt } = status;
   if (status.chain && status.chain !== "mainnet") {
@@ -208,9 +208,9 @@ function render(status) {
   text("sync-percent", `${(sync * 100).toFixed(3)}%`);
   text("sync-detail", syncing ? "Initial block download in progress" : "Fully synchronized and ready to mine");
   byId("sync-progress").style.width = `${Math.max(sync * 100, 0.4)}%`;
-  text("pool-clients", pool.sv2_clients.total_clients);
-  text("pool-channels", `${pool.sv2_clients.total_channels} channels`);
-  text("pool-hashrate", hashrate(pool.sv2_clients.total_hashrate));
+  text("pool-clients", pool.total_clients);
+  text("pool-channels", `${pool.total_channels} channels`);
+  text("pool-hashrate", hashrate(pool.total_hashrate));
   text("core-peers", network.connections);
   text("core-network", network.networkactive ? "P2P active" : "P2P disabled");
   text("pool-uptime", duration(pool.uptime_secs));
@@ -222,7 +222,7 @@ function render(status) {
   renderTarget(status.mining, blockchain, shares.channels || [], status.chain, shares.totals);
   renderReward(status.reward, status.price);
   const target = Number(status.mining?.next?.difficulty ?? status.mining?.difficulty) || 0;
-  text("reward-odds", blockOdds(target, Number(pool.sv2_clients.total_hashrate) || 0));
+  text("reward-odds", blockOdds(target, Number(pool.total_hashrate) || 0));
   renderShareEvents(shares);
   renderWorkers(shares.channels || []);
   renderMiners(bitaxes);

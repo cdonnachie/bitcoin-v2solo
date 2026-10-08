@@ -154,6 +154,22 @@ To value the next block reward, the dashboard fetches the BTC price from
 outside your network. Set `DASHBOARD_FIAT` in `.env` to choose the currency
 (USD, EUR, GBP, CAD, CHF, AUD or JPY).
 
+## Upgrading the pool image
+
+`compose.yaml` pins `stratumv2/pool_sv2` by digest, so nothing changes until you choose
+to. Don't follow `:main` (development builds, several a day). Watch
+https://github.com/stratum-mining/sv2-apps/releases, then check a candidate first:
+
+```bash
+scripts/check-pool-image.sh stratumv2/pool_sv2:v0.9.0
+```
+
+It verifies the log lines the dashboard parses and, running the candidate against the
+regtest node, every monitoring API field the dashboard reads, using the image's own
+OpenAPI spec. `dashboard/pool-api.js` is the only code that reads raw pool responses, so a
+renamed field is fixed there. After the check passes, test block submission on regtest
+(below), then put the printed digest in the compose files and restart the pool.
+
 ## testnet4 trial
 
 `compose.testnet4.yaml` runs a separate testnet4 node and pool to prove the
