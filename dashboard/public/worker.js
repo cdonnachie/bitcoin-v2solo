@@ -69,7 +69,7 @@ function renderWorker(data) {
 
 async function refresh() {
   try {
-    const response = await fetch(`/api/worker?id=${encodeURIComponent(identity)}`);
+    const response = await apiFetch(`/api/worker?id=${encodeURIComponent(identity)}`);
     if (response.status === 404) throw new Error("Unknown worker");
     if (!response.ok) throw new Error("Dashboard API is unavailable");
     renderWorker(await response.json());
@@ -101,7 +101,7 @@ function drawHistory() {
 
 async function loadHistory() {
   try {
-    const response = await fetch(`/api/history?hours=${historyHours}&worker=${encodeURIComponent(identity)}`);
+    const response = await apiFetch(`/api/history?hours=${historyHours}&worker=${encodeURIComponent(identity)}`);
     if (!response.ok) return;
     historyData = await response.json();
     drawHistory();
@@ -130,7 +130,7 @@ function drawShares() {
 
 async function loadShares() {
   try {
-    const response = await fetch(`/api/shares?hours=${sharesHours}&worker=${encodeURIComponent(identity)}`);
+    const response = await apiFetch(`/api/shares?hours=${sharesHours}&worker=${encodeURIComponent(identity)}`);
     if (!response.ok) return;
     sharesData = (await response.json()).shares;
     drawShares();
@@ -156,3 +156,8 @@ refresh();
 loadHistory();
 setInterval(refresh, 10_000);
 setInterval(loadHistory, 60_000);
+
+// Hide the Security link when sign-in is turned off (DASHBOARD_AUTH=off).
+fetch("/api/auth/state").then((response) => response.json()).then((state) => {
+  if (state.disabled) byId("security-link").hidden = true;
+}).catch(() => {});

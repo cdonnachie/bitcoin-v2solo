@@ -233,7 +233,7 @@ async function refresh() {
   const button = byId("refresh");
   button.disabled = true;
   try {
-    const response = await fetch("/api/status");
+    const response = await apiFetch("/api/status");
     if (!response.ok) throw new Error("Dashboard API is unavailable");
     const errors = render(await response.json());
     byId("connection-dot").className = errors.length ? "status-dot" : "status-dot healthy";
@@ -267,7 +267,7 @@ function drawHistory() {
 
 async function loadHistory() {
   try {
-    const response = await fetch(`/api/history?hours=${historyHours}`);
+    const response = await apiFetch(`/api/history?hours=${historyHours}`);
     byId("history-panel").hidden = !response.ok;
     if (!response.ok) return;
     historyData = await response.json();
@@ -291,3 +291,8 @@ setInterval(loadHistory, 60_000);
 byId("refresh").addEventListener("click", refresh);
 refresh();
 setInterval(refresh, 10_000);
+
+// Hide the Security link when sign-in is turned off (DASHBOARD_AUTH=off).
+fetch("/api/auth/state").then((response) => response.json()).then((state) => {
+  if (state.disabled) byId("security-link").hidden = true;
+}).catch(() => {});

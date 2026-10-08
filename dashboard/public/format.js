@@ -94,3 +94,13 @@ function shareRow(share, showWorker) {
   row.replaceChildren(...cells);
   return row;
 }
+
+// fetch() for the dashboard's own API: a 401 means the session ended, so go to sign-in.
+async function apiFetch(url) {
+  const response = await fetch(url);
+  if (response.status === 401) {
+    location.replace(`/login.html?next=${encodeURIComponent(location.pathname + location.search)}`);
+    throw new Error("Signed out");
+  }
+  return response;
+}

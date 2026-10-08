@@ -97,6 +97,8 @@ services:
     environment:
       DASHBOARD_BITAXE_HOSTS: ${DASHBOARD_BITAXE_HOSTS:-}
       DASHBOARD_FIAT: ${DASHBOARD_FIAT:-USD}
+      DASHBOARD_AUTH: ${DASHBOARD_AUTH:-on}
+      DASHBOARD_TRUST_PROXY: ${DASHBOARD_TRUST_PROXY:-0}
       DASHBOARD_POOL_LOG: /var/log/pool/pool.log
       # Shown when a worker's username has no payout address, so its blocks pay the pool.
       DASHBOARD_POOL_ADDRESS: ${POOL_PAYOUT_ADDRESS:-}

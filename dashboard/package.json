@@ -1,0 +1,11 @@
+{
+  "name": "bitcoin-v2solo-dashboard",
+  "private": true,
+  "license": "MIT",
+  "description": "Mining dashboard for the Bitcoin V2 Solo Pool stack",
+  "main": "server.js",
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "@simplewebauthn/server": "^13.0.0"
+  }
+}

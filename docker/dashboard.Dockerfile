@@ -1,10 +1,10 @@
 FROM node:22-alpine
 
 WORKDIR /app
-COPY dashboard/server.js ./server.js
-COPY dashboard/history.js ./history.js
-COPY dashboard/sharelog.js ./sharelog.js
-COPY dashboard/pool-api.js ./pool-api.js
+# Dependencies first, so code changes reuse the cached install. The lockfile pins versions.
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY dashboard/server.js dashboard/history.js dashboard/sharelog.js dashboard/pool-api.js dashboard/auth.js dashboard/reset-password.js ./
 COPY dashboard/public ./public
 
 EXPOSE 8080

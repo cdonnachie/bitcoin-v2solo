@@ -94,11 +94,31 @@ highlighted.
 docker compose --profile pool --profile dashboard up -d dashboard
 ```
 
-Open `http://<DASHBOARD_BIND_ADDRESS>:8080`. The dashboard has **no login of its own**,
-and it shows payout addresses and worker details, so keep it on a private network or
-VPN, or put it behind a reverse proxy with authentication (for example nginx
-`auth_basic` over HTTPS). It also listens on `127.0.0.1:8080` for a proxy on the same
-host, or for `tailscale serve --bg 8080`.
+Open `http://<DASHBOARD_BIND_ADDRESS>:8080`. It also listens on `127.0.0.1:8080` for a
+reverse proxy on the same host, or for `tailscale serve --bg 8080`.
+
+#### Sign-in
+
+The dashboard requires sign-in (it shows payout addresses and worker details):
+
+1. On first start it prints a one-time setup code to its log:
+   `docker logs bitcoin-v2solo-dashboard 2>&1 | grep 'setup code'`.
+   Enter it with a new password (10+ characters) on the login page. Without the code,
+   whoever reaches a fresh install first cannot claim it.
+2. Sessions last 30 days and survive restarts. Five failed attempts from one address
+   lock it out for 15 minutes.
+3. **Passkeys** (Face ID, Windows Hello, phones, security keys) can be added under
+   Security once the dashboard is opened over **HTTPS with a domain name**: behind a
+   reverse proxy, Tailscale Serve (`https://<host>.ts.net`) or a tunnel. Browsers do not
+   allow passkeys on plain HTTP or IP addresses; the password works everywhere.
+4. Forgot the password: `docker exec bitcoin-v2solo-dashboard node reset-password.js`
+   removes it and signs everyone out (passkeys are kept); the dashboard then prints a
+   new setup code.
+
+Behind your own reverse proxy, set `DASHBOARD_TRUST_PROXY=1` so the dashboard uses the
+proxy's `X-Forwarded-*` headers for rate limiting and secure cookies, but only if
+clients cannot reach port 8080 directly. `DASHBOARD_AUTH=off` disables sign-in; use it
+only where nothing untrusted can reach the dashboard.
 
 Set `DASHBOARD_BITAXE_HOSTS` to the miners' IP addresses if the dashboard can reach
 them, for temperature, error rate and clock settings.
@@ -109,7 +129,7 @@ them, for temperature, error rate and clock settings.
 | --- | --- | --- |
 | 3333 | SV2 pool | To your miners. It can be public: SV2 connections are encrypted and authenticated by the authority key. |
 | 8333 | Bitcoin P2P | Public is fine and helps block propagation |
-| 8080 | Dashboard | Private network, VPN or authenticated proxy only |
+| 8080 | Dashboard | Requires sign-in. Best behind HTTPS (reverse proxy or Tailscale Serve), which also enables passkeys |
 | 8332, 9090 | Core RPC, pool monitoring | Never; bound to `127.0.0.1` |
 
 A bind address chooses the interface, not who may connect: use the host or router

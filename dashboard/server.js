@@ -4,6 +4,24 @@ const path = require("node:path");
 const { openHistory } = require("./history");
 const { followShareLog } = require("./sharelog");
 const { poolApi } = require("./pool-api");
+const { openAuth } = require("./auth");
+
+// Sign-in is on unless DASHBOARD_AUTH=off. If the login database cannot be opened the
+// dashboard exits rather than serve pool data without protection.
+const authEnabled = (process.env.DASHBOARD_AUTH || "on").toLowerCase() !== "off";
+const auth = authEnabled
+  ? openAuth(process.env.DASHBOARD_AUTH_DB || "/var/lib/dashboard/auth.db", { trustProxy: process.env.DASHBOARD_TRUST_PROXY === "1" })
+  : null;
+if (!auth) console.warn("DASHBOARD_AUTH=off: the dashboard is open to anyone who can reach it");
+
+const PROTECTED_PAGES = new Set(["/", "/index.html", "/worker.html", "/settings.html"]);
+// Same-origin scripts and styles only, no framing by other sites, no MIME sniffing.
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "same-origin",
+  "X-Frame-Options": "DENY",
+};
 
 const port = Number(process.env.PORT || 8080);
 const publicDirectory = path.join(__dirname, "public");
@@ -376,10 +394,24 @@ function contentType(file) {
 
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, "http://dashboard");
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.setHeader(name, value);
   const sendJson = (code, body) => {
     response.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     response.end(JSON.stringify(body));
   };
+
+  // Sign-in endpoints, then the gate: pool data and pages need a session; static assets
+  // (code and styles, which are public in the repository anyway) do not.
+  if (!auth && url.pathname === "/api/auth/state") return sendJson(200, { disabled: true, authenticated: true, configured: true });
+  if (auth && (await auth.handle(request, response, url))) return;
+  if (auth && !auth.authenticated(request)) {
+    if (url.pathname.startsWith("/api/")) return sendJson(401, { error: "Sign in required" });
+    if (PROTECTED_PAGES.has(url.pathname)) {
+      response.writeHead(302, { Location: `/login.html?next=${encodeURIComponent(url.pathname + url.search)}`, "Cache-Control": "no-store" });
+      response.end();
+      return;
+    }
+  }
 
   if (url.pathname === "/api/history") {
     if (!historyDb) return sendJson(503, { error: "History database unavailable" });

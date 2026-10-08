@@ -6,3 +6,6 @@ secrets/
 # Build output and local tool artifacts.
 target/
 .playwright-mcp/
+
+# Dashboard npm dependencies (installed in its Docker image).
+dashboard/node_modules/

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign In · Mining Console</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="auth-page">
+      <section class="auth-card" aria-labelledby="auth-heading">
+        <p class="eyebrow">PRIVATE STRATUM V2 POOL</p>
+        <h1 id="auth-heading">Mining Console</h1>
+
+        <form id="setup-form" class="auth-form" hidden>
+          <input type="text" name="username" value="admin" autocomplete="username" hidden aria-hidden="true">
+          <p class="auth-note">Set the dashboard password. The setup code is printed in the dashboard's log:</p>
+          <pre class="auth-command">docker logs bitcoin-v2solo-dashboard 2>&amp;1 | grep 'setup code'</pre>
+          <label>Setup code<input id="setup-code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required></label>
+          <label>New password<input id="setup-password" type="password" autocomplete="new-password" minlength="10" required></label>
+          <label>Confirm password<input id="setup-confirm" type="password" autocomplete="new-password" minlength="10" required></label>
+          <button type="submit">Set password</button>
+        </form>
+
+        <form id="login-form" class="auth-form" hidden>
+          <input type="text" name="username" value="admin" autocomplete="username" hidden aria-hidden="true">
+          <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+          <button type="submit">Sign in</button>
+          <button type="button" id="passkey-login" class="secondary" hidden>Sign in with a passkey</button>
+        </form>
+
+        <p id="auth-error" class="auth-error" role="alert"></p>
+      </section>
+    </main>
+    <script src="passkey.js"></script>
+    <script src="login.js"></script>
+  </body>
+</html>
