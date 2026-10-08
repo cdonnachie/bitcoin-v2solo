@@ -229,7 +229,11 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
       body += chunk;
       if (body.length > 64 * 1024) throw new Error("Request too large");
     }
-    return body ? JSON.parse(body) : {};
+    try {
+      return body ? JSON.parse(body) : {};
+    } catch {
+      throw new Error(`Request body is not valid JSON (${body.length} bytes, content-length ${request.headers["content-length"] ?? "none"})`);
+    }
   }
 
   function send(response, code, body) {
@@ -399,7 +403,9 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
       }
       return send(response, 404, { error: "Unknown auth endpoint" }), true;
     } catch (error) {
-      console.error(`Auth: ${error.message}`);
+      // Name the route and where it failed; the browser only gets a generic message.
+      const where = String(error.stack || "").split(/\r?\n/).slice(1, 4).map((line) => line.trim()).join(" < ");
+      console.error(`Auth ${route}: ${error.message} (${where})`);
       return send(response, 400, { error: "Request could not be processed" }), true;
     }
   }
