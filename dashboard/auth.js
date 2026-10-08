@@ -150,10 +150,22 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
     return Boolean(request.socket.encrypted) || (trustProxy && String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https");
   }
 
+  // The page's origin as the browser reports it. Browsers send Origin on POSTs but not on a
+  // page's own same-origin GETs, which carry Referer instead (Referrer-Policy: same-origin).
+  function browserOrigin(request) {
+    if (request.headers.origin) return request.headers.origin;
+    try {
+      return request.headers.referer ? new URL(request.headers.referer).origin : null;
+    } catch {
+      return null;
+    }
+  }
+
   // WebAuthn relying party for this request: the browser's own origin. Passkeys are offered only
   // in a secure context on a domain name (browsers refuse IP addresses as passkey domains).
+  // Registration and sign-in themselves are POSTs, so they always use the Origin header.
   function relyingParty(request) {
-    const origin = request.headers.origin;
+    const origin = browserOrigin(request);
     if (!origin) return null;
     let url;
     try {
@@ -166,7 +178,7 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
     const isIp = /^[\d.]+$/.test(hostname) || hostname.includes(":");
     if (isIp || (url.protocol !== "https:" && !isLocalhost)) return null;
     // Same-origin requests only: the origin must be the host this request was sent to.
-    if (!sameOrigin(request)) return null;
+    if (url.host !== requestHost(request)) return null;
     return { rpID: hostname, origin: url.origin };
   }
 
