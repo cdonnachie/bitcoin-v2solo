@@ -312,6 +312,10 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
           if (lockedOut(request)) return send(response, 429, { error: "Too many attempts; try again in 15 minutes" }), true;
           const { challengeId, credential } = await readJson(request);
           const pending = takeChallenge(challengeId);
+          if (pending && (!credential?.response?.clientDataJSON || !credential.response.signature)) {
+            console.error(`Auth passkey sign-in: incomplete response (fields: ${Object.keys(credential?.response || {}).join(", ") || "none"})`);
+            return send(response, 400, { error: "The browser or password manager returned an incomplete passkey response. Try again." }), true;
+          }
           const key = credential?.id ? q.passkey.get(credential.id) : null;
           if (!pending || !key || key.rp_id !== pending.rpID) {
             recordFailure(request);
@@ -383,6 +387,10 @@ function openAuth(file, { trustProxy = false, announce = true } = {}) {
           const { challengeId, credential, name } = await readJson(request);
           const pending = takeChallenge(challengeId);
           if (!pending) return send(response, 400, { error: "Registration expired; try again" }), true;
+          if (!credential?.response?.clientDataJSON || !credential.response.attestationObject) {
+            console.error(`Auth passkey registration: incomplete response (fields: ${Object.keys(credential?.response || {}).join(", ") || "none"})`);
+            return send(response, 400, { error: "The browser or password manager returned an incomplete passkey. Try again, or use the browser's own passkey prompt." }), true;
+          }
           const result = await verifyRegistrationResponse({
             response: credential,
             expectedChallenge: pending.challenge,
