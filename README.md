@@ -115,6 +115,9 @@ The dashboard requires sign-in (it shows payout addresses and worker details):
    removes it and signs everyone out (passkeys are kept); the dashboard then prints a
    new setup code.
 
+A ready-made nginx site with Let's Encrypt HTTPS is in
+[`deploy/nginx/mining-dashboard.conf`](deploy/nginx/mining-dashboard.conf).
+
 Behind your own reverse proxy, set `DASHBOARD_TRUST_PROXY=1` so the dashboard uses the
 proxy's `X-Forwarded-*` headers for rate limiting and secure cookies, but only if
 clients cannot reach port 8080 directly. `DASHBOARD_AUTH=off` disables sign-in; use it
