@@ -48,13 +48,13 @@ services:
         condition: service_started
     # Same authority keys as mainnet, so the Bitaxe keeps the same trusted public key.
     env_file:
-      - ${POOL_ENV_FILE:-G:/bitcoin-v2solo/secrets/pool.env}
+      - ${POOL_ENV_FILE:?Set POOL_ENV_FILE in .env}
     environment:
       POOL__LISTEN_ADDRESS: 0.0.0.0:3333
       POOL__CERT_VALIDITY_SEC: "3600"
       POOL__COINBASE_REWARD_SCRIPT: addr(${TESTNET4_PAYOUT_ADDRESS:?Set TESTNET4_PAYOUT_ADDRESS in .env})
       POOL__SERVER_ID: "1"
-      POOL__POOL_SIGNATURE: CraigD V2 Solo testnet4
+      POOL__POOL_SIGNATURE: ${POOL_SIGNATURE:-SV2 Solo} testnet4
       POOL__SHARES_PER_MINUTE: "6.0"
       POOL__SHARE_BATCH_SIZE: "10"
       POOL__MONITORING_ADDRESS: 0.0.0.0:9090
@@ -73,7 +73,7 @@ services:
         source: pool-logs
         target: /logs
     ports:
-      - "${POOL_BIND_ADDRESS:-10.0.0.185}:3334:3333"
+      - "${POOL_BIND_ADDRESS:?Set POOL_BIND_ADDRESS in .env}:3334:3333"
       - "127.0.0.1:9091:9090"
     logging: *logging
     restart: unless-stopped
@@ -111,7 +111,7 @@ services:
         source: pool-logs
         target: /var/log/pool
     ports:
-      - "${DASHBOARD_BIND_ADDRESS:-10.0.0.185}:8081:8080"
+      - "${DASHBOARD_BIND_ADDRESS:?Set DASHBOARD_BIND_ADDRESS in .env}:8081:8080"
     logging: *logging
     restart: unless-stopped
     profiles: ["dashboard"]

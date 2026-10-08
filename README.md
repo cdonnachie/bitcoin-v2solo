@@ -1,92 +1,81 @@
 # Bitcoin V2 Solo Pool
 
-This stack runs an IPC-capable Bitcoin Core node plus an SRI Stratum V2 solo
-pool for Bitaxe miners.
+A self-hosted solo mining stack for Stratum V2 miners such as the Bitaxe:
 
-## Node data location
+- **Bitcoin Core 30** with its IPC mining interface, supplying block templates;
+- **SRI `pool_sv2`**, the Stratum V2 reference pool, paying each block to the miner's
+  own address;
+- a **dashboard**: sync status, next block reward and odds, per-worker hashrate,
+  payouts, individual shares and their difficulty, with lifetime history.
 
-Bitcoin Core data lives in the Docker volume `bitcoin-v2solo-data`, inside
-Docker Desktop's Linux disk image. Do not bind-mount a Windows folder instead:
-Docker Desktop's Windows file sharing is slow for Bitcoin Core's databases and
-does not reliably make their writes durable. An earlier bind-mounted node lost
-its block index and chainstate on a restart.
+Everything runs in Docker Compose. Linux is the intended host; see
+[Docker Desktop](#docker-desktop-windows-and-macos) for Windows and macOS.
 
-To keep the node on `G:`, move Docker Desktop's disk image there once:
-Docker Desktop → Settings → Resources → Advanced → Disk image location →
-`G:\DockerDesktop`, then Apply & restart. This moves every container and
-volume, and all of them are stopped while it copies.
+## Quick start
 
-Then start the node:
+```bash
+git clone <this repository> && cd bitcoin-v2solo
+cp .env.example .env        # then edit it: addresses, payout address, signature
+```
 
-```powershell
-Copy-Item .env.example .env
+### 1. Node
+
+```bash
 docker compose up --build -d bitcoin-node
 docker compose logs -f bitcoin-node
 ```
 
-The volume will contain the full blockchain, chainstate, peer data, and the
-Unix IPC socket consumed by the Stratum V2 pool. Do not place wallet files
-there; this configuration starts Bitcoin Core with `-disablewallet=1` because
-the pool pays a solved block's coinbase directly to your address.
+Bitcoin Core keeps its data in the Docker volume `bitcoin-v2solo-data`: blocks,
+chainstate, peers and the Unix IPC socket the pool uses. It runs pruned by default
+(`BITCOIN_PRUNE_MIB`, about 20 GB of recent blocks), which is fully compatible with the
+pool; turning pruning off later means downloading the chain again. The wallet is
+disabled: the pool pays a solved block's coinbase straight to the payout address.
 
-Compose gives Bitcoin Core up to 10 minutes to shut down cleanly. Stop it with
-`docker compose stop bitcoin-node` rather than killing the container.
+Compose gives Core up to 10 minutes to shut down. Stop it with
+`docker compose stop bitcoin-node`, never by killing the container, or its databases
+can be corrupted.
 
-Bitcoin Core runs with automatic pruning enabled by default, retaining about
-20 GB of recent block files plus chainstate and metadata. This remains fully
-compatible with the Stratum V2 pool. A pruned node cannot serve historical
-blocks or use `txindex`; disabling pruning later requires re-downloading the
-blockchain.
+RPC (`8332`) is bound to `127.0.0.1` on the host and reachable only by the other
+containers. Port `8333` takes Bitcoin peers; forwarding it from the internet gets you
+inbound peers and new blocks sooner.
 
-Docker binds RPC to this PC only on port `8332`; do not expose it to the LAN.
-Port `8333` accepts normal Bitcoin P2P peers.
+### 2. Pool keys
 
-## LAN-only access
+The pool proves its identity to miners with an SV2 authority key pair. Create it once,
+outside the repository:
 
-The pool (`3333`) and dashboard (`8080`) listen on this PC's LAN address,
-`10.0.0.185`. A bind address only chooses the listening interface; it does not
-limit who may connect. To refuse anything outside `10.0.0.0/24`, add this
-Windows Firewall rule once from an elevated PowerShell:
-
-```powershell
-New-NetFirewallRule -DisplayName "Bitcoin V2 Solo: LAN only" `
-	-Direction Inbound -Action Block -Protocol TCP `
-	-LocalAddress 10.0.0.185 -LocalPort 3333,3334,3335,8080 `
-	-RemoteAddress 0.0.0.0-9.255.255.255,10.0.1.0-255.255.255.255
+```bash
+docker compose --profile tools build sv2-keygen
+mkdir -p /opt/secrets && chmod 700 /opt/secrets
+docker compose --profile tools run --rm -T sv2-keygen > /opt/secrets/pool.env
+chmod 600 /opt/secrets/pool.env
+grep PUBLIC /opt/secrets/pool.env      # the public key miners are given
 ```
 
-Block rules override Docker Desktop's own allow rules, so this holds even if
-port forwarding is later opened on the router.
+Back up `pool.env`. Do not generate new keys once miners are configured: a new key
+pair changes the public key every miner trusts.
 
-## Pool setup
+### 3. Pool
 
-Before starting the pool, set `POOL_PAYOUT_ADDRESS` in `.env` to your mainnet
-Bitcoin address and create its unique SV2 authority keys:
+Start the pool once the node has finished its initial sync
+(`initialblockdownload` is `false`):
 
-```powershell
-New-Item -ItemType Directory -Force G:\bitcoin-v2solo\secrets
-docker compose --profile tools run --rm sv2-keygen |
-	Set-Content G:\bitcoin-v2solo\secrets\pool.env
-```
-
-The pool can run while Bitcoin Core syncs, but do not start the Bitaxes until
-`initialblockdownload` is `false`:
-
-```powershell
+```bash
+docker exec bitcoin-v2solo-node bitcoin-cli -datadir=/data getblockchaininfo
 docker compose --profile pool up -d pool
 docker compose logs -f pool
 ```
 
-In AxeOS, create an SV2 pool entry with host `10.0.0.185`, port `3333`, and the
-authority public key from `G:\bitcoin-v2solo\secrets\pool.env`. Set the miner
-username to your payout address, optionally followed by `.bitaxe-1` or
-`.bitaxe-2`.
+In AxeOS, add an SV2 pool: host `POOL_BIND_ADDRESS` (or the public address that reaches
+it), port `3333`, the authority public key, and Extended Channels. Use your payout
+address as the username, optionally followed by a worker name:
+`bc1q….bitaxe-1`.
 
-### Who gets paid
+#### Who gets paid
 
-Each miner's username decides the payout of the blocks it finds, so other people
-can mine here to their own address. `POOL_PAYOUT_ADDRESS` is only the pool's
-address. Verified on regtest with real blocks for the first and last rows:
+Each miner's username decides the payout of the blocks it finds, so other people can
+mine here to their own address. `POOL_PAYOUT_ADDRESS` is only the pool's address.
+Verified on regtest with real blocks for the first and last rows:
 
 | Username | Block reward |
 | --- | --- |
@@ -95,66 +84,79 @@ address. Verified on regtest with real blocks for the first and last rows:
 | `sri/donate/<percent>/<address>/<worker>` | `<percent>` to the pool, the rest to the address |
 | `sri/donate/<worker>`, or no valid address (for example a typo) | 100% to `POOL_PAYOUT_ADDRESS` |
 
-A mistyped address silently pays the pool, so check the dashboard's Pool Workers
-panel: each worker shows the address its blocks pay, and anything paying the
-pool is highlighted.
+A mistyped address silently pays the pool, so check the dashboard's Pool Workers panel:
+each worker shows the address its blocks pay, and anything paying the pool is
+highlighted.
 
-Do not run `sv2-keygen` again after configuring AxeOS. Generating new authority
-keys changes the public key trusted by every miner; rotate it only when you
-intend to update both Bitaxes.
+### 4. Dashboard
 
-## Mining dashboard
-
-The dashboard is LAN-only and reports real Bitcoin Core synchronization, pool
-channels and hashrate, plus configured Bitaxe status. Add the two Bitaxe IP
-addresses to `DASHBOARD_BITAXE_HOSTS` in `.env`, separated by a comma, then run:
-
-```powershell
-docker compose --profile dashboard up -d dashboard
+```bash
+docker compose --profile pool --profile dashboard up -d dashboard
 ```
 
-Open `http://10.0.0.185:8080` from a device on your private network.
+Open `http://<DASHBOARD_BIND_ADDRESS>:8080`. The dashboard has **no login of its own**,
+and it shows payout addresses and worker details, so keep it on a private network or
+VPN, or put it behind a reverse proxy with authentication (for example nginx
+`auth_basic` over HTTPS). It also listens on `127.0.0.1:8080` for a proxy on the same
+host, or for `tailscale serve --bg 8080`.
 
-For access from anywhere on your tailnet, the dashboard also listens on
-`127.0.0.1:8080`, and Tailscale Serve publishes that over HTTPS (tailnet only):
+Set `DASHBOARD_BITAXE_HOSTS` to the miners' IP addresses if the dashboard can reach
+them, for temperature, error rate and clock settings.
 
-```powershell
-tailscale serve --bg 8080
-tailscale serve status
-```
+## Network exposure
 
-This persists across reboots. Turn it off with `tailscale serve --https=443 off`.
+| Port | Service | Expose? |
+| --- | --- | --- |
+| 3333 | SV2 pool | To your miners. It can be public: SV2 connections are encrypted and authenticated by the authority key. |
+| 8333 | Bitcoin P2P | Public is fine and helps block propagation |
+| 8080 | Dashboard | Private network, VPN or authenticated proxy only |
+| 8332, 9090 | Core RPC, pool monitoring | Never; bound to `127.0.0.1` |
 
-### History database
+A bind address chooses the interface, not who may connect: use the host or router
+firewall to limit access. Docker-published ports bypass the host's `INPUT` chain, so
+put such rules in `DOCKER-USER` or in the firewall in front of the host.
 
-The dashboard keeps a small SQLite database in the `bitcoin-v2solo-dashboard-data`
-volume (`/var/lib/dashboard/history.db`), so worker totals survive pool restarts,
-miner reconnects and dashboard rebuilds:
+## Dashboard data
+
+The dashboard keeps a SQLite database in the `bitcoin-v2solo-dashboard-data` volume
+(`/var/lib/dashboard/history.db`), so worker totals survive pool restarts, miner
+reconnects and dashboard rebuilds:
 
 - lifetime accepted and rejected shares, total work, all-time best share and blocks
   found for each worker (by username);
-- per-minute share work for each worker, kept 90 days (`/api/history?hours=24`);
-- connect events (90 days), for the reconnect count shown on each worker, and
-  blocks found (kept forever).
+- per-minute share work and best share per worker, kept 90 days
+  (`/api/history?hours=24`);
+- individual shares with their actual difficulty, kept 7 days (`/api/shares`);
+- connect events (90 days) and blocks found (kept forever).
 
-The pool also writes its log to `/logs/pool.log` in the `bitcoin-v2solo-pool-logs`
-volume. The dashboard follows it for each share's hash, which gives the share's actual
-difficulty (shown in the share feed and on each worker's page), keeps individual shares
-for 7 days and the best share per minute for 90 days, and empties the file once it has
-read past 50 MB. Docker's own container logs are capped at 5 × 20 MB per service.
+Individual shares come from the pool's log: the pool writes it to `/logs/pool.log` in
+the `bitcoin-v2solo-pool-logs` volume, and each valid share's hash gives its difficulty
+(difficulty-1 target ÷ hash). The dashboard empties the file once it has read past
+50 MB. Docker's own container logs are capped at 5 × 20 MB per service.
 
-Back it up with a consistent copy while the dashboard runs:
+Back the database up with a consistent copy while the dashboard runs:
 
 ```bash
-docker run --rm -v bitcoin-v2solo-dashboard-data:/v alpine sh -c   "apk add -q sqlite && sqlite3 /v/history.db '.backup /v/history-backup.db'"
+docker run --rm -v bitcoin-v2solo-dashboard-data:/v alpine sh -c \
+  "apk add -q sqlite && sqlite3 /v/history.db '.backup /v/history-backup.db'"
 ```
 
 To value the next block reward, the dashboard fetches the BTC price from
-`https://mempool.space/api/v1/prices` once an hour; this is its only request
-outside your network. Set `DASHBOARD_FIAT` in `.env` to choose the currency
-(USD, EUR, GBP, CAD, CHF, AUD or JPY).
+`https://mempool.space/api/v1/prices` once an hour; this is its only request outside
+your network. `DASHBOARD_FIAT` chooses the currency.
 
-## Upgrading the pool image
+## Updating
+
+Dashboard-only changes:
+
+```bash
+git pull && docker compose --profile pool --profile dashboard up -d --build --no-deps dashboard
+```
+
+Use the full `up -d --build` only when a change touches the node or the pool (the
+compose files or Dockerfiles); it restarts them.
+
+### Upgrading the pool image
 
 `compose.yaml` pins `stratumv2/pool_sv2` by digest, so nothing changes until you choose
 to. Don't follow `:main` (development builds, several a day). Watch
@@ -166,68 +168,71 @@ scripts/check-pool-image.sh stratumv2/pool_sv2:v0.9.0
 
 It verifies the log lines the dashboard parses and, running the candidate against the
 regtest node, every monitoring API field the dashboard reads, using the image's own
-OpenAPI spec. `dashboard/pool-api.js` is the only code that reads raw pool responses, so a
-renamed field is fixed there. After the check passes, test block submission on regtest
+OpenAPI spec. `dashboard/pool-api.js` is the only code that reads raw pool responses, so
+a renamed field is fixed there. After the check passes, test block submission on regtest
 (below), then put the printed digest in the compose files and restart the pool.
 
-## testnet4 trial
+## Testing the mining path
 
-`compose.testnet4.yaml` runs a separate testnet4 node and pool to prove the
-whole path (template, share, block submission, broadcast, payout) before relying
-on mainnet. It is its own Compose project with its own volume, so it cannot
-affect the mainnet stack. testnet4 permits a minimum-difficulty block after 20
-minutes without one, so a single Bitaxe can find real blocks.
+### regtest smoke test
 
-Set `TESTNET4_PAYOUT_ADDRESS` in `.env` to a `tb1` address, then start it:
+`compose.regtest.yaml` runs a private regtest chain with its own pool on port `3335`.
+Nearly every share is a block, so within seconds it shows whether the pool, the miner
+and the payout work together. It has no peers, so it cannot prove the network would
+accept a block; use testnet4 for that.
 
-```powershell
-docker compose -f compose.testnet4.yaml up -d bitcoin-node
-docker compose -f compose.testnet4.yaml --profile pool up -d pool
-```
+A fresh regtest node stays in initial block download until it has one block. Create a
+wallet, mine that block, then set `REGTEST_PAYOUT_ADDRESS`:
 
-Wait until the node's `initialblockdownload` is `false`:
-
-```powershell
-docker exec bitcoin-v2solo-testnet4-node bitcoin-cli -testnet4 -datadir=/data getblockchaininfo
-```
-
-Then point one Bitaxe at host `10.0.0.185`, port `3334`, with the same authority
-public key as mainnet and the `tb1` payout address as its username. Watch for a
-found block with:
-
-```powershell
-docker logs -f bitcoin-v2solo-testnet4-pool
-```
-
-Confirm the block on mempool.space/testnet4: it should be in the chain, pay the
-`tb1` address, and carry the `Bitcoin V2 Solo testnet4` coinbase signature.
-Afterwards, point the Bitaxe back at port `3333` with its mainnet username.
-
-## regtest smoke test
-
-`compose.regtest.yaml` runs a private regtest chain on port `3335`. Nearly every
-share is a block, so within seconds it shows whether the pool, the Bitaxe and the
-payout work together. It has no peers, so it cannot prove that the network would
-accept a block; use the testnet4 trial for that.
-
-A fresh regtest node stays in initial block download until it has one block.
-Create a wallet, mine that block, then set `REGTEST_PAYOUT_ADDRESS`:
-
-```powershell
+```bash
 docker compose -f compose.regtest.yaml up -d bitcoin-node
-docker exec bitcoin-v2solo-regtest-node bitcoin-cli -regtest -datadir=/data -named createwallet wallet_name=regtest-payout load_on_startup=true
-docker exec bitcoin-v2solo-regtest-node bitcoin-cli -regtest -datadir=/data -rpcwallet=regtest-payout getnewaddress
-docker exec bitcoin-v2solo-regtest-node bitcoin-cli -regtest -datadir=/data generatetoaddress 1 <bcrt1 address>
+alias rcli='docker exec bitcoin-v2solo-regtest-node bitcoin-cli -regtest -datadir=/data'
+rcli -named createwallet wallet_name=regtest-payout load_on_startup=true
+rcli -rpcwallet=regtest-payout getnewaddress
+rcli generatetoaddress 1 <bcrt1 address>
 docker compose -f compose.regtest.yaml --profile pool up -d pool
 ```
 
-Point a Bitaxe at host `10.0.0.185`, port `3335`, with the mainnet authority
-public key and the `bcrt1` address as its username. Check that blocks pay it:
+Point a miner at port `3335` with the same authority public key and a `bcrt1` address
+as its username, then check that blocks pay it:
 
-```powershell
-docker exec bitcoin-v2solo-regtest-node bitcoin-cli -regtest -datadir=/data getblockchaininfo
-docker exec bitcoin-v2solo-regtest-node bitcoin-cli -regtest -datadir=/data -rpcwallet=regtest-payout getbalances
+```bash
+rcli getblockchaininfo
+rcli scantxoutset start '["addr(<bcrt1 address>)"]'
 ```
 
-Coinbase rewards stay "immature" for 100 blocks, which shows they reached the
-wallet.
+### testnet4 trial
+
+`compose.testnet4.yaml` runs a separate testnet4 node, pool (port `3334`) and dashboard
+(port `8081`), its own Compose project with its own volumes. testnet4 allows a
+minimum-difficulty block after 20 minutes without one, so a single Bitaxe can find real
+blocks, though other miners race for the same windows. Set `TESTNET4_PAYOUT_ADDRESS` in
+`.env` to a `tb1` address first.
+
+```bash
+docker compose -f compose.testnet4.yaml up -d bitcoin-node
+docker exec bitcoin-v2solo-testnet4-node bitcoin-cli -testnet4 -datadir=/data getblockchaininfo
+docker compose -f compose.testnet4.yaml --profile pool --profile dashboard up -d
+```
+
+Once synced, point a miner at port `3334` with a `tb1` address as its username. When the
+pool logs `Block Found`, confirm on mempool.space/testnet4 that the block is in the
+chain, pays that address and carries your `POOL_SIGNATURE` followed by `testnet4`.
+
+## Docker Desktop (Windows and macOS)
+
+The stack runs under Docker Desktop too, with two differences:
+
+- Keep Bitcoin Core's data in the named volume, as configured. Do not bind-mount a host
+  folder instead: Docker Desktop's file sharing is slow for Core's databases and does
+  not reliably make their writes durable (a bind-mounted node here once lost its block
+  index on restart). To put the data on another drive, move Docker Desktop's disk image
+  (Settings → Resources → Advanced → Disk image location).
+- On Windows, run the shell commands above from Git Bash or WSL; PowerShell can corrupt
+  binary pipes. Limit access to the published ports with a Windows Firewall block rule
+  for remote addresses outside your LAN; block rules override Docker Desktop's own
+  allow rules.
+
+## License
+
+MIT; see [LICENSE](LICENSE).

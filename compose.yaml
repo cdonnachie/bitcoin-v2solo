@@ -51,13 +51,13 @@ services:
       bitcoin-node:
         condition: service_started
     env_file:
-      - ${POOL_ENV_FILE:-G:/bitcoin-v2solo/secrets/pool.env}
+      - ${POOL_ENV_FILE:?Set POOL_ENV_FILE in .env}
     environment:
       POOL__LISTEN_ADDRESS: 0.0.0.0:3333
       POOL__CERT_VALIDITY_SEC: "3600"
       POOL__COINBASE_REWARD_SCRIPT: addr(${POOL_PAYOUT_ADDRESS:-replace-with-your-mainnet-bitcoin-address})
       POOL__SERVER_ID: "1"
-      POOL__POOL_SIGNATURE: CraigD V2 Solo
+      POOL__POOL_SIGNATURE: ${POOL_SIGNATURE:-SV2 Solo}
       POOL__SHARES_PER_MINUTE: "6.0"
       POOL__SHARE_BATCH_SIZE: "10"
       POOL__MONITORING_ADDRESS: 0.0.0.0:9090
@@ -76,7 +76,7 @@ services:
         source: pool-logs
         target: /logs
     ports:
-      - "${POOL_BIND_ADDRESS:-10.0.0.185}:3333:3333"
+      - "${POOL_BIND_ADDRESS:?Set POOL_BIND_ADDRESS in .env}:3333:3333"
       - "127.0.0.1:9090:9090"
     logging: *logging
     restart: unless-stopped
@@ -114,7 +114,7 @@ services:
         source: pool-logs
         target: /var/log/pool
     ports:
-      - "${DASHBOARD_BIND_ADDRESS:-10.0.0.185}:8080:8080"
+      - "${DASHBOARD_BIND_ADDRESS:?Set DASHBOARD_BIND_ADDRESS in .env}:8080:8080"
       # Local-only listener for Tailscale Serve, which publishes the dashboard to the tailnet.
       - "127.0.0.1:8080:8080"
     logging: *logging
@@ -122,7 +122,7 @@ services:
     profiles: ["dashboard"]
 
 volumes:
-  # Lives inside Docker Desktop's disk image; move that image to G: to keep the node on G:.
+  # Bitcoin Core's data directory: blocks, chainstate and the IPC socket the pool uses.
   bitcoin-data:
     name: bitcoin-v2solo-data
   dashboard-data:
