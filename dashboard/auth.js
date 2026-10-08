@@ -51,7 +51,7 @@ async function checkPassword(password, stored) {
   return crypto.timingSafeEqual(key, expected);
 }
 
-function openAuth(file, { trustProxy = false } = {}) {
+function openAuth(file, { trustProxy = false, announce = true } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(`
@@ -96,6 +96,8 @@ function openAuth(file, { trustProxy = false } = {}) {
   // A fresh code each start while no password is set; printed to the container log.
   let setupCode = null;
   function ensureSetupCode() {
+    // Only the running dashboard issues codes; tools such as reset-password.js do not.
+    if (!announce) return;
     if (passwordHash()) {
       setupCode = null;
       return;
